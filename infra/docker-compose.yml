@@ -1,0 +1,21 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: TP3-IS-28998_postgres
+    environment:
+      POSTGRES_DB: tp3_is
+      POSTGRES_USER: tp3_28998
+      POSTGRES_PASSWORD: tp3pwd_28998
+    ports:
+      - "5432:5432"
+    volumes:
+      - tp3_pgdata:/var/lib/postgresql/data
+      - ./init:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tp3_28998 -d tp3_is"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  tp3_pgdata:
