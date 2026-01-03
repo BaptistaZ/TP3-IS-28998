@@ -10,26 +10,23 @@ from ariadne import QueryType, make_executable_schema, gql
 from ariadne.asgi import GraphQL
 import uvicorn
 
+from starlette.applications import Starlette
+from starlette.responses import JSONResponse
+from starlette.routing import Route, Mount
+
 load_dotenv()  
 
 # -----------------------------
 # Config
 # -----------------------------
-BI_PORT = int(os.getenv("BI_SERVICE_PORT", "4000"))
+BI_PORT = int(os.getenv("PORT") or os.getenv("BI_SERVICE_PORT", "4000"))
 
 # gRPC BI Service endpoint
-GRPC_HOST = os.getenv("GRPC_SERVICE_HOST", "localhost")
+GRPC_HOST = os.getenv("GRPC_SERVICE_HOST", "grpc-service")
 GRPC_PORT = int(os.getenv("GRPC_SERVICE_PORT", "50051"))
 
-# Add grpc-service root to sys.path so we can import: generated.bi_pb2*
-# Expected:
-# services/grpc-service/generated/bi_pb2.py
-# services/grpc-service/generated/bi_pb2_grpc.py
-GRPC_SERVICE_DIR = (Path(__file__).resolve().parents[1] / "grpc-service")
-sys.path.append(str(GRPC_SERVICE_DIR))
 
-from generated import bi_pb2, bi_pb2_grpc  # noqa: E402
-
+from generated import bi_pb2, bi_pb2_grpc  
 
 # -----------------------------
 # gRPC helpers
@@ -134,9 +131,16 @@ def resolve_category_agg(*_) -> List[Dict[str, Any]]:
 schema = make_executable_schema(type_defs, query)
 app = GraphQL(schema, debug=True)
 
+def http_health(request):
+    return JSONResponse({"ok": True, "service": "bi-service"})
+
+starlette_app = Starlette(
+    routes=[
+        Route("/health", http_health, methods=["GET"]),
+        Mount("/graphql", app),
+    ]
+)
+
 
 if __name__ == "__main__":
-    print(f"[BI GraphQL] Starting on :{BI_PORT}")
-    print(f"[BI GraphQL] Using gRPC BI Service: {GRPC_HOST}:{GRPC_PORT}")
-    print(f"[BI GraphQL] Protobuf root: {GRPC_SERVICE_DIR}")
-    uvicorn.run(app, host="0.0.0.0", port=BI_PORT, log_level="info")
+    uvicorn.run(starlette_app, host="0.0.0.0", port=BI_PORT, log_level="info")

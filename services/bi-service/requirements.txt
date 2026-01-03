@@ -4,3 +4,4 @@ requests==2.32.3
 python-dotenv==1.0.1
 grpcio==1.76.0
 protobuf>=5.0.0
+starlette>=0.40.0,<0.47.0

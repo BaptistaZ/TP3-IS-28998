@@ -10,5 +10,5 @@ COPY services/bi-service/ /app/
 COPY services/grpc-service/generated/ /app/generated/
 RUN test -f /app/generated/__init__.py || touch /app/generated/__init__.py
 
-EXPOSE 4000
+EXPOSE 8080
 CMD ["python", "server.py"]
