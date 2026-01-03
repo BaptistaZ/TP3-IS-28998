@@ -3,7 +3,8 @@
 # =========================
 .env
 .env.*
-!.env.example
+infra/.env.docker
+infra/.env.docker.secrets
 
 # =========================
 # Python
