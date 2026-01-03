@@ -1,13 +1,13 @@
 import os
+import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-import requests
+import grpc
 from dotenv import load_dotenv
 
 from ariadne import QueryType, make_executable_schema, gql
 from ariadne.asgi import GraphQL
-
 import uvicorn
 
 
@@ -21,56 +21,63 @@ load_dotenv(dotenv_path=ROOT_ENV)
 # Config
 # -----------------------------
 BI_PORT = int(os.getenv("BI_SERVICE_PORT", "4000"))
-XML_BASE_URL = os.getenv("XML_SERVICE_BASE_URL", "http://localhost:7001")
 
-# REST endpoints exposed by xml-service
-DOCS_URL = f"{XML_BASE_URL}/docs"
-ASSETS_URL = f"{XML_BASE_URL}/query/ativos"
-AGG_URL = f"{XML_BASE_URL}/query/agg/category"
+# gRPC BI Service endpoint
+GRPC_HOST = os.getenv("GRPC_SERVICE_HOST", "localhost")
+GRPC_PORT = int(os.getenv("GRPC_SERVICE_PORT", "50051"))
+
+# Add grpc-service root to sys.path so we can import: generated.bi_pb2*
+# Expected:
+# services/grpc-service/generated/bi_pb2.py
+# services/grpc-service/generated/bi_pb2_grpc.py
+GRPC_SERVICE_DIR = (Path(__file__).resolve().parents[1] / "grpc-service")
+sys.path.append(str(GRPC_SERVICE_DIR))
+
+from generated import bi_pb2, bi_pb2_grpc  # noqa: E402
 
 
 # -----------------------------
-# Helpers (REST -> GraphQL mapping)
+# gRPC helpers
 # -----------------------------
-def _http_get(url: str, params: Optional[Dict[str, Any]] = None, timeout_s: int = 10) -> Dict[str, Any]:
-    """Perform a GET request and return JSON or raise a clear error."""
-    r = requests.get(url, params=params or {}, timeout=timeout_s)
-    r.raise_for_status()
-    return r.json()
+def grpc_stub() -> bi_pb2_grpc.BIServiceStub:
+    """Create a gRPC stub to talk to BIService."""
+    target = f"{GRPC_HOST}:{GRPC_PORT}"
+    channel = grpc.insecure_channel(target)
+    return bi_pb2_grpc.BIServiceStub(channel)
 
 
-def map_doc(d: Dict[str, Any]) -> Dict[str, Any]:
-    # xml-service returns: { id, mapper_version, data_criacao }
+# -----------------------------
+# Helpers (gRPC -> GraphQL mapping)
+# -----------------------------
+def map_doc(d: Any) -> Dict[str, Any]:
     return {
-        "id": int(d["id"]),
-        "mapperVersion": str(d.get("mapper_version", "")),
-        "createdAt": str(d.get("data_criacao", "")),
+        "id": int(d.id),
+        "mapperVersion": str(d.mapper_version),
+        "createdAt": str(d.created_at),
     }
 
 
-def map_asset(a: Dict[str, Any]) -> Dict[str, Any]:
-    # xml-service returns: doc_id, id_interno, ticker, tipo, preco_eur, preco_usd, volume, taxa_eurusd, processado_utc
+def map_asset(a: Any) -> Dict[str, Any]:
     return {
-        "docId": int(a.get("doc_id")),
-        "internalId": str(a.get("id_interno", "")),
-        "ticker": str(a.get("ticker", "")),
-        "category": str(a.get("tipo", "")),
-        "priceEur": float(a["preco_eur"]) if a.get("preco_eur") is not None else None,
-        "priceUsd": float(a["preco_usd"]) if a.get("preco_usd") is not None else None,
-        "volume": float(a["volume"]) if a.get("volume") is not None else None,
-        "fxEurUsd": float(a["taxa_eurusd"]) if a.get("taxa_eurusd") is not None else None,
-        "processedAtUtc": str(a.get("processado_utc", "")) if a.get("processado_utc") is not None else None,
+        "docId": int(a.doc_id),
+        "internalId": str(a.internal_id),
+        "ticker": str(a.ticker),
+        "category": str(a.category),
+        "priceEur": float(a.price_eur),
+        "priceUsd": float(a.price_usd),
+        "volume": float(a.volume),
+        "fxEurUsd": float(a.fx_eur_usd),
+        "processedAtUtc": str(a.processed_at_utc),
     }
 
 
-def map_agg(row: Dict[str, Any]) -> Dict[str, Any]:
-    # xml-service returns: category, total_ativos, total_volume, avg_preco_eur, avg_preco_usd
+def map_agg(row: Any) -> Dict[str, Any]:
     return {
-        "category": str(row.get("category", "")),
-        "totalAssets": int(row.get("total_ativos", 0)),
-        "totalVolume": float(row["total_volume"]) if row.get("total_volume") is not None else None,
-        "avgPriceEur": float(row["avg_preco_eur"]) if row.get("avg_preco_eur") is not None else None,
-        "avgPriceUsd": float(row["avg_preco_usd"]) if row.get("avg_preco_usd") is not None else None,
+        "category": str(row.category),
+        "totalAssets": int(row.total_assets),
+        "totalVolume": float(row.total_volume),
+        "avgPriceEur": float(row.avg_price_eur),
+        "avgPriceUsd": float(row.avg_price_usd),
     }
 
 
@@ -90,38 +97,51 @@ def resolve_health(*_) -> str:
 
 @query.field("docs")
 def resolve_docs(*_, limit: int = 10) -> List[Dict[str, Any]]:
-    payload = _http_get(DOCS_URL, params={"limit": limit})
-    docs = payload.get("docs", [])
-    return [map_doc(d) for d in docs]
+    try:
+        stub = grpc_stub()
+        resp = stub.ListDocs(bi_pb2.ListDocsRequest(limit=limit))
+        return [map_doc(d) for d in resp.docs]
+    except grpc.RpcError as e:
+        raise RuntimeError(f"gRPC ListDocs failed: {e.code().name} - {e.details()}")
 
 
 @query.field("assets")
-def resolve_assets(*_, ticker: Optional[str] = None, category: Optional[str] = None, limit: int = 50) -> List[Dict[str, Any]]:
-    params: Dict[str, Any] = {"limit": limit}
-    if ticker:
-        params["ticker"] = ticker
-    if category:
-        params["category"] = category
-
-    payload = _http_get(ASSETS_URL, params=params)
-    rows = payload.get("rows", [])
-    return [map_asset(r) for r in rows]
+def resolve_assets(
+    *_,
+    ticker: Optional[str] = None,
+    category: Optional[str] = None,
+    limit: int = 50
+) -> List[Dict[str, Any]]:
+    try:
+        stub = grpc_stub()
+        resp = stub.QueryAssets(
+            bi_pb2.QueryAssetsRequest(
+                ticker=ticker or "",
+                category=category or "",
+                limit=limit,
+            )
+        )
+        return [map_asset(a) for a in resp.assets]
+    except grpc.RpcError as e:
+        raise RuntimeError(f"gRPC QueryAssets failed: {e.code().name} - {e.details()}")
 
 
 @query.field("categoryAgg")
 def resolve_category_agg(*_) -> List[Dict[str, Any]]:
-    payload = _http_get(AGG_URL)
-    rows = payload.get("rows", [])
-    return [map_agg(r) for r in rows]
+    try:
+        stub = grpc_stub()
+        resp = stub.CategoryAgg(bi_pb2.CategoryAggRequest())
+        return [map_agg(r) for r in resp.rows]
+    except grpc.RpcError as e:
+        raise RuntimeError(f"gRPC CategoryAgg failed: {e.code().name} - {e.details()}")
 
 
 schema = make_executable_schema(type_defs, query)
-
-# ASGI app (GraphQL Playground included in-browser)
 app = GraphQL(schema, debug=True)
 
 
 if __name__ == "__main__":
     print(f"[BI GraphQL] Starting on :{BI_PORT}")
-    print(f"[BI GraphQL] Using XML Service base URL: {XML_BASE_URL}")
+    print(f"[BI GraphQL] Using gRPC BI Service: {GRPC_HOST}:{GRPC_PORT}")
+    print(f"[BI GraphQL] Protobuf root: {GRPC_SERVICE_DIR}")
     uvicorn.run(app, host="0.0.0.0", port=BI_PORT, log_level="info")
