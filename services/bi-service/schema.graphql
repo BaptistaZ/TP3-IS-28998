@@ -1,0 +1,39 @@
+type Doc {
+  id: Int!
+  mapperVersion: String!
+  createdAt: String!
+}
+
+type Asset {
+  docId: Int!
+  internalId: String!
+  ticker: String!
+  category: String!
+  priceEur: Float
+  priceUsd: Float
+  volume: Float
+  fxEurUsd: Float
+  processedAtUtc: String
+}
+
+type CategoryAgg {
+  category: String!
+  totalAssets: Int!
+  totalVolume: Float
+  avgPriceEur: Float
+  avgPriceUsd: Float
+}
+
+type Query {
+  health: String!
+
+  docs(limit: Int = 10): [Doc!]!
+
+  assets(
+    ticker: String
+    category: String
+    limit: Int = 50
+  ): [Asset!]!
+
+  categoryAgg: [CategoryAgg!]!
+}
