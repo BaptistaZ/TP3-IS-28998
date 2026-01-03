@@ -5,6 +5,7 @@ from datetime import datetime
 import csv
 import io
 from typing import Dict, Any, List
+from xmlrpc.client import ServerProxy
 
 import boto3
 from botocore.client import Config
@@ -119,24 +120,45 @@ def save_state(state: Dict[str, Any]):
 # -----------------------------
 # External enrichment
 # -----------------------------
-def fetch_fx_eur_usd() -> float:
+def fetch_fx_eur_usd():
     """
-    Fetch EUR->USD FX rate from an external API.
-    Supports common response formats:
-      - Frankfurter: {"rates": {"USD": 1.0}, ...}
-      - Others: {"conversion_rates": {"USD": 1.0}, ...}
+    Prefer XML-RPC (internal protocol requirement).
+    Fallback to direct REST call if XML-RPC is unavailable.
     """
-    r = requests.get(FX_URL, timeout=8)
-    r.raise_for_status()
-    data = r.json()
+    rpc_host = os.getenv("RPC_SERVICE_HOST", "localhost")
+    rpc_port = int(os.getenv("RPC_SERVICE_PORT", "9000"))
+    rpc_url = f"http://{rpc_host}:{rpc_port}/RPC2"
 
-    if "rates" in data and "USD" in data["rates"]:
-        return float(data["rates"]["USD"])
+    try:
+        # XML-RPC call (Protocol: RPC/XML-RPC)
+        client = ServerProxy(rpc_url, allow_none=True)
 
-    if "conversion_rates" in data and "USD" in data["conversion_rates"]:
-        return float(data["conversion_rates"]["USD"])
+        rate = client.get_eur_usd_rate()
 
-    raise RuntimeError(f"Unexpected FX API response: {data}")
+        # Evidence: confirms the FX rate was obtained via XML-RPC
+        print(f"[Processor] FX via XML-RPC OK -> {rate}")
+
+        return float(rate)
+
+    except Exception as e:
+        # Fallback to REST FX API (keeps pipeline resilient)
+        print(f"[Processor] XML-RPC unavailable, fallback to REST FX API. Reason: {e}")
+
+        r = requests.get(FX_URL, timeout=8)
+        r.raise_for_status()
+        data = r.json()
+
+        if "rates" in data and "USD" in data["rates"]:
+            rate = float(data["rates"]["USD"])
+            print(f"[Processor] FX via REST OK -> {rate}")
+            return rate
+
+        if "conversion_rates" in data and "USD" in data["conversion_rates"]:
+            rate = float(data["conversion_rates"]["USD"])
+            print(f"[Processor] FX via REST OK -> {rate}")
+            return rate
+
+        raise RuntimeError(f"Unexpected FX API response: {data}")
 
 
 # -----------------------------
