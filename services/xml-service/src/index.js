@@ -53,7 +53,7 @@ app.post("/ingest", upload.single("mapped_csv"), async (req, res) => {
   try {
     IngestSchema.parse({ request_id: requestId, mapper_version: mapperVersion, webhook_url: webhookUrl });
 
-    if (!req.file) throw new Error("Ficheiro mapped_csv em falta");
+    if (!req.file) throw new Error("Missing mapped_csv file");
 
     const csvText = req.file.buffer.toString("utf-8");
     const rows = parseMappedCsv(csvText);
@@ -74,16 +74,16 @@ app.post("/ingest", upload.single("mapped_csv"), async (req, res) => {
       db_document_id: docId,
     }).catch(() => {});
   } catch (e) {
-    const msg = e?.message || "Erro";
+    const msg = e?.message || "Error";
     // Try to notify via webhook
     if (webhookUrl) {
       axios.post(webhookUrl, {
         request_id: requestId || "unknown",
-        status: "ERRO_VALIDACAO",
+        status: "VALIDATION_ERROR",
         error: msg,
       }).catch(() => {});
     }
-    res.status(400).json({ request_id: requestId, status: "ERRO_VALIDACAO", error: msg });
+    res.status(400).json({ request_id: requestId, status: "VALIDATION_ERROR", error: msg });
   }
 });
 

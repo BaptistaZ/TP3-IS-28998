@@ -11,12 +11,12 @@ export const IngestSchema = z.object({
 // Expected mapped CSV produced by the Processor
 export function parseMappedCsv(text) {
   const lines = text.trim().split(/\r?\n/);
-  if (lines.length < 2) throw new Error("CSV vazio ou sem dados");
+  if (lines.length < 2) throw new Error("Empty CSV or no data rows");
 
   const header = lines[0].split(",");
   const required = ["internal_id","symbol","category","price_eur","price_usd","volume","fx_eur_usd","mapper_version","processed_at_utc"];
   for (const col of required) {
-    if (!header.includes(col)) throw new Error(`CSV sem coluna obrigatória: ${col}`);
+    if (!header.includes(col)) throw new Error(`Missing required CSV column: ${col}`);
   }
 
   const idx = Object.fromEntries(header.map((h, i) => [h, i]));
