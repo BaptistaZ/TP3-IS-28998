@@ -1,15 +1,10 @@
 import os
-from pathlib import Path
 from xmlrpc.server import SimpleXMLRPCServer, SimpleXMLRPCRequestHandler
 
 import requests
 from dotenv import load_dotenv
 
-# -----------------------------
-# Load root .env (project-level)
-# -----------------------------
-ROOT_ENV = (Path(__file__).resolve().parents[2] / ".env")
-load_dotenv(dotenv_path=ROOT_ENV)
+load_dotenv()
 
 
 class RequestHandler(SimpleXMLRPCRequestHandler):

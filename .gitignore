@@ -4,8 +4,6 @@
 .env
 .env.*
 !.env.example
-!infra/.env.docker
-!infra/.env.cloud
 
 # =========================
 # Python

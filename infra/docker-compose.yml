@@ -1,7 +1,9 @@
+name: tp3-is-28998
+
 services:
   postgres:
     image: postgres:16
-    container_name: TP3-IS-28998_postgres
+    container_name: postgres
     environment:
       POSTGRES_DB: tp3_is
       POSTGRES_USER: tp3_28998
@@ -17,5 +19,95 @@ services:
       timeout: 5s
       retries: 10
 
+  xml-service:
+    build:
+      context: ..
+      dockerfile: services/xml-service/Dockerfile
+    container_name: xml-service
+    env_file:
+      - .env.docker
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "7001:7001"
+
+  grpc-service:
+    build:
+      context: ..
+      dockerfile: services/grpc-service/Dockerfile
+    container_name: grpc-service
+    env_file:
+      - .env.docker
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "50051:50051"
+
+  rpc-service:
+    build:
+      context: ..
+      dockerfile: services/rpc-service/Dockerfile
+    container_name: rpc-service
+    env_file:
+      - .env.docker
+    ports:
+      - "9000:9000"
+
+  processor:
+    build:
+      context: ..
+      dockerfile: services/processor/Dockerfile
+    container_name: processor
+    env_file:
+      - .env.docker
+    command: ["python", "processor.py"]
+    depends_on:
+      xml-service:
+        condition: service_started
+      rpc-service:
+        condition: service_started
+      webhook:
+        condition: service_started
+    volumes:
+      - processor_tmp:/app/tmp
+
+  webhook:
+    build:
+      context: ..
+      dockerfile: services/processor/Dockerfile
+    container_name: webhook
+    env_file:
+      - .env.docker
+    command: ["python", "webhook_server.py"]
+    ports:
+      - "8000:8000"
+
+  crawler:
+    build:
+      context: ..
+      dockerfile: services/crawler/Dockerfile
+    container_name: crawler
+    env_file:
+      - .env.docker
+    depends_on:
+      processor:
+        condition: service_started
+
+  bi-service:
+    build:
+      context: ..
+      dockerfile: services/bi-service/Dockerfile
+    container_name: bi-service
+    env_file:
+      - .env.docker
+    depends_on:
+      grpc-service:
+        condition: service_started
+    ports:
+      - "4000:4000"
+
 volumes:
   tp3_pgdata:
+  processor_tmp:

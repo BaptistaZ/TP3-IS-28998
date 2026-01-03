@@ -10,12 +10,7 @@ from ariadne import QueryType, make_executable_schema, gql
 from ariadne.asgi import GraphQL
 import uvicorn
 
-
-# -----------------------------
-# Environment loading (root .env)
-# -----------------------------
-ROOT_ENV = (Path(__file__).resolve().parents[2] / ".env")
-load_dotenv(dotenv_path=ROOT_ENV)
+load_dotenv()  
 
 # -----------------------------
 # Config
