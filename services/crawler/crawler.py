@@ -8,21 +8,28 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+# Split size (bytes) per part
 MAX_BYTES = int(os.getenv("CRAWLER_MAX_PART_BYTES", str(5 * 1024 * 1024)))
 
+# Supabase S3 settings
 ENDPOINT = os.getenv("SUPABASE_S3_ENDPOINT")
 REGION = os.getenv("SUPABASE_S3_REGION", "eu-central-1")
 ACCESS_KEY = os.getenv("SUPABASE_S3_ACCESS_KEY")
 SECRET_KEY = os.getenv("SUPABASE_S3_SECRET_KEY")
 BUCKET = os.getenv("SUPABASE_BUCKET_NAME")
 
+# Interval
 POLL_SECONDS = int(os.getenv("POLL_INTERVAL_SECONDS", "15"))
 
+# Prefixes / paths
 INCOMING_PREFIX = os.getenv("SUPABASE_INCOMING_PREFIX", "incoming/")
 if not INCOMING_PREFIX.endswith("/"):
     INCOMING_PREFIX += "/"
-    
+
 SAMPLE_PATH = os.getenv("CRAWLER_SAMPLE_CSV", "datasets/generated/incidents_50mb.csv")
+
+# One-shot mode (run once then exit)
+ONE_SHOT = os.getenv("CRAWLER_ONE_SHOT", "0") == "1"
 
 
 def get_s3():
@@ -49,53 +56,76 @@ def get_s3():
 
 
 def upload_once(s3):
+    # timestamp for batch id
     ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
-    base_key = f"incoming/incidents_28998_{ts}"
+    base_key = f"{INCOMING_PREFIX}incidents_28998_{ts}"  # <--- uses env prefix
+
+    # read whole CSV
+    with open(SAMPLE_PATH, "r", encoding="utf-8", newline="") as f:
+        lines = f.read().splitlines()
+
+    if not lines:
+        print("[Crawler] CSV vazio, nada a enviar.")
+        return 0
+
+    header = lines[0]
+    rows = lines[1:]
+    if not rows:
+        print("[Crawler] CSV só tem header, nada a enviar.")
+        return 0
 
     part_idx = 1
     current_bytes = 0
     buffer_lines = []
+    uploaded_parts = 0
 
-    with open(SAMPLE_PATH, "r", encoding="utf-8", newline="") as f:
-        reader = f.read().splitlines()
-        if not reader:
-            print("[Crawler] CSV vazio, nada a enviar.")
+    def flush_part(lines_part, idx):
+        nonlocal uploaded_parts
+        if not lines_part:
             return
+        key = f"{base_key}_part{idx:04d}.csv"
+        body = "\n".join([header] + lines_part) + "\n"
+        s3.put_object(Bucket=BUCKET, Key=key, Body=body.encode("utf-8"))
+        uploaded_parts += 1
+        print(f"[Crawler] Uploaded -> {key} ({len(body)/1024:.1f} KB)")
 
-        header = reader[0]
-        rows = reader[1:]
+    for line in rows:
+        line_bytes = len(line.encode("utf-8")) + 1  # + newline
+        if current_bytes + line_bytes > MAX_BYTES and buffer_lines:
+            flush_part(buffer_lines, part_idx)
+            part_idx += 1
+            buffer_lines = []
+            current_bytes = 0
 
-        def flush_part(lines, idx):
-            if not lines:
-                return
-            key = f"{base_key}_part{idx:04d}.csv"
-            body = "\n".join([header] + lines) + "\n"
-            s3.put_object(Bucket=BUCKET, Key=key, Body=body.encode("utf-8"))
-            print(f"[Crawler] Uploaded -> {key} ({len(body)/1024:.1f} KB)")
+        buffer_lines.append(line)
+        current_bytes += line_bytes
 
-        for line in rows:
-            line_bytes = len(line.encode("utf-8")) + 1  
-            if current_bytes + line_bytes > MAX_BYTES and buffer_lines:
-                flush_part(buffer_lines, part_idx)
-                part_idx += 1
-                buffer_lines = []
-                current_bytes = 0
-
-            buffer_lines.append(line)
-            current_bytes += line_bytes
-
-        flush_part(buffer_lines, part_idx)
+    flush_part(buffer_lines, part_idx)
+    return uploaded_parts
 
 
 def main():
     s3 = get_s3()
     print(f"[Crawler] Bucket: {BUCKET}")
     print(f"[Crawler] Source: {SAMPLE_PATH}")
+    print(f"[Crawler] Incoming prefix: {INCOMING_PREFIX}")
+    print(f"[Crawler] Max part bytes: {MAX_BYTES}")
     print(f"[Crawler] Intervalo: {POLL_SECONDS}s")
+    print(f"[Crawler] One-shot: {ONE_SHOT}")
 
+    # Always do at least one upload
+    parts = upload_once(s3)
+    print(f"[Crawler] Batch uploaded parts: {parts}")
+
+    if ONE_SHOT:
+        print("[Crawler] ONE_SHOT=1 -> done (will exit).")
+        return
+
+    # Loop mode
     while True:
-        upload_once(s3)
         time.sleep(POLL_SECONDS)
+        parts = upload_once(s3)
+        print(f"[Crawler] Batch uploaded parts: {parts}")
 
 
 if __name__ == "__main__":

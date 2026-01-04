@@ -31,6 +31,8 @@ services:
         condition: service_healthy
     ports:
       - "7001:7001"
+    volumes:
+      - ../services/xml-service/generated-xml:/app/generated-xml
 
   grpc-service:
     build:
@@ -94,6 +96,8 @@ services:
     depends_on:
       processor:
         condition: service_started
+    volumes:
+      - ../datasets:/app/datasets
 
   bi-service:
     build:

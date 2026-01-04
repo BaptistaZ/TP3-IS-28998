@@ -30,6 +30,8 @@ const REQUIRED_COLUMNS = [
   "response_eta_min",
   "response_time_min",
   "estimated_cost_eur",
+  "estimated_cost_usd",
+  "fx_eur_usd",
   "risk_score",
   "location_corrected",
   "tags",
@@ -136,6 +138,9 @@ export function parseMappedCsv(text) {
       risk_score: toNumber(cols[idx.risk_score]),
       location_corrected: toBoolean(cols[idx.location_corrected]),
 
+      estimated_cost_usd: toNumber(cols[idx.estimated_cost_usd]),
+      fx_eur_usd: toNumber(cols[idx.fx_eur_usd]),
+
       tags: cols[idx.tags],
       notes: cols[idx.notes],
     });
@@ -228,14 +233,27 @@ export function buildXml({ requestId, mapperVersion, rows }) {
       .up()
       .up();
 
-    // Risk / Cost block
+    // Risk / Financial Impact block 
     incident
       .ele("Assessment")
-      .ele("EstimatedCostEUR")
-      .txt(r.estimated_cost_eur ?? "")
-      .up()
       .ele("RiskScore")
       .txt(r.risk_score ?? "")
+      .up()
+      .up();
+
+    incident
+      .ele("FinancialImpact")
+      .ele("EstimatedCost")
+      .att("currency", "EUR")
+      .txt(r.estimated_cost_eur ?? "")
+      .up()
+      .ele("EstimatedCost")
+      .att("currency", "USD")
+      .txt(r.estimated_cost_usd ?? "")
+      .up()
+      .ele("ExchangeRate")
+      .att("source", "Frankfurter")
+      .txt(r.fx_eur_usd ?? "")
       .up()
       .up();
 
