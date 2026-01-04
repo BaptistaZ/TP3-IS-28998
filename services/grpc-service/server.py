@@ -90,11 +90,11 @@ class BIService(bi_pb2_grpc.BIServiceServicer):
 
         if ticker:
             params.append(ticker)
-            where.append(f"x.ticker = %s")
+            where.append("x.ticker = %s")
 
         if category:
             params.append(category)
-            where.append(f"x.tipo = %s")
+            where.append("x.tipo = %s")
 
         where_sql = f"WHERE {' AND '.join(where)}" if where else ""
 

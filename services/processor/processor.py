@@ -120,6 +120,20 @@ def save_state(state: Dict[str, Any]):
 # -----------------------------
 # External enrichment
 # -----------------------------
+
+def _to_float(value: Any) -> float:
+    # xmlrpc pode devolver coisas "estranhas" para o type-checker
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, bytes):
+        return float(value.decode("utf-8").strip())
+    if hasattr(value, "data") and isinstance(getattr(value, "data"), (bytes, bytearray)):
+        # xmlrpc.client.Binary -> tem .data (bytes)
+        return float(value.data.decode("utf-8").strip())
+    # fallback: str()
+    return float(str(value).strip())
+
+
 def fetch_fx_eur_usd():
     """
     Prefer XML-RPC (internal protocol requirement).
@@ -134,11 +148,12 @@ def fetch_fx_eur_usd():
         client = ServerProxy(rpc_url, allow_none=True)
 
         rate = client.get_eur_usd_rate()
+        rate_f = _to_float(rate)
 
         # Evidence: confirms the FX rate was obtained via XML-RPC
-        print(f"[Processor] FX via XML-RPC OK -> {rate}")
+        print(f"[Processor] FX via XML-RPC OK -> {rate_f}")
 
-        return float(rate)
+        return rate_f
 
     except Exception as e:
         # Fallback to REST FX API (keeps pipeline resilient)
@@ -186,41 +201,80 @@ def download_object_to_memory(s3, key: str) -> io.StringIO:
 def write_mapped_csv(local_path: str, input_stream: io.StringIO, fx_usd: float):
     """
     Stream read + stream write (row by row).
-    Maps source CSV fields to domain-friendly fields and adds enrichment.
     """
     reader = csv.DictReader(input_stream)
 
     fieldnames = [
-        "internal_id",
-        "symbol",
-        "category",
-        "price_eur",
-        "price_usd",
-        "volume",
+        "incident_id",
+        "source",
+        "incident_type",
+        "severity",
+        "status",
+        "city",
+        "country",
+        "continent",
+        "lat",
+        "lon",
+        "location_accuracy_m",
+        "reported_at",
+        "validated_at",
+        "resolved_at",
+        "last_update_utc",
+        "assigned_unit",
+        "resources_count",
+        "response_eta_min",
+        "response_time_min",
+        "estimated_cost_eur",
+        "estimated_cost_usd",
+        "risk_score",
+        "location_corrected",
+        "tags",
+        "notes",
         "fx_eur_usd",
         "mapper_version",
         "processed_at_utc",
     ]
 
-    processed_at = datetime.utcnow().isoformat()
+    processed_at = datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
+    mapper_version = os.getenv("MAPPER_VERSION", "1.0.0")
 
     with open(local_path, "w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
 
         for row in reader:
-            price_eur = float(row["preco"])
-            price_usd = round(price_eur * fx_usd, 6)
+            cost_eur_str = (row.get("estimated_cost_eur") or "").strip()
+            cost_eur = float(cost_eur_str) if cost_eur_str else 0.0
+            cost_usd = round(cost_eur * fx_usd, 6)
 
             writer.writerow({
-                "internal_id": row["id_interno"],
-                "symbol": row["ticker"],
-                "category": row["tipo"],
-                "price_eur": price_eur,
-                "price_usd": price_usd,
-                "volume": int(row["volume"]),
+                "incident_id": row.get("incident_id", ""),
+                "source": row.get("source", ""),
+                "incident_type": row.get("incident_type", ""),
+                "severity": row.get("severity", ""),
+                "status": row.get("status", ""),
+                "city": row.get("city", ""),
+                "country": row.get("country", ""),
+                "continent": row.get("continent", ""),
+                "lat": row.get("lat", ""),
+                "lon": row.get("lon", ""),
+                "location_accuracy_m": row.get("location_accuracy_m", ""),
+                "reported_at": row.get("reported_at", ""),
+                "validated_at": row.get("validated_at", ""),
+                "resolved_at": row.get("resolved_at", ""),
+                "last_update_utc": row.get("last_update_utc", ""),
+                "assigned_unit": row.get("assigned_unit", ""),
+                "resources_count": row.get("resources_count", ""),
+                "response_eta_min": row.get("response_eta_min", ""),
+                "response_time_min": row.get("response_time_min", ""),
+                "estimated_cost_eur": f"{cost_eur:.2f}",
+                "estimated_cost_usd": f"{cost_usd:.2f}",
+                "risk_score": row.get("risk_score", ""),
+                "location_corrected": row.get("location_corrected", ""),
+                "tags": row.get("tags", ""),
+                "notes": row.get("notes", ""),
                 "fx_eur_usd": fx_usd,
-                "mapper_version": os.getenv("MAPPER_VERSION", "1.0.0"),
+                "mapper_version": mapper_version,
                 "processed_at_utc": processed_at,
             })
 

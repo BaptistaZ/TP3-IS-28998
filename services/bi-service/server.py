@@ -1,5 +1,4 @@
 import os
-import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -14,6 +13,8 @@ from starlette.applications import Starlette
 from starlette.responses import JSONResponse
 from starlette.routing import Route, Mount
 
+from generated import bi_pb2, bi_pb2_grpc 
+
 load_dotenv()  
 
 # -----------------------------
@@ -26,7 +27,7 @@ GRPC_HOST = os.getenv("GRPC_SERVICE_HOST", "grpc-service")
 GRPC_PORT = int(os.getenv("GRPC_SERVICE_PORT", "50051"))
 
 
-from generated import bi_pb2, bi_pb2_grpc  
+ 
 
 # -----------------------------
 # gRPC helpers
