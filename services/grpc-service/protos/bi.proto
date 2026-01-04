@@ -4,8 +4,11 @@ package bi;
 
 service BIService {
   rpc ListDocs (ListDocsRequest) returns (ListDocsResponse);
-  rpc QueryAssets (QueryAssetsRequest) returns (QueryAssetsResponse);
-  rpc CategoryAgg (CategoryAggRequest) returns (CategoryAggResponse);
+
+  // Incidents (new model)
+  rpc QueryIncidents (QueryIncidentsRequest) returns (QueryIncidentsResponse);
+  rpc AggByType (AggByTypeRequest) returns (AggByTypeResponse);
+  rpc AggBySeverity (AggBySeverityRequest) returns (AggBySeverityResponse);
 }
 
 message ListDocsRequest {
@@ -22,38 +25,78 @@ message ListDocsResponse {
   repeated Doc docs = 1;
 }
 
-message QueryAssetsRequest {
-  string ticker = 1;     
-  string category = 2;   
-  int32 limit = 3;
+// ------------------------
+// QueryIncidents
+// ------------------------
+message QueryIncidentsRequest {
+  string type = 1;
+  string severity = 2;
+  string status = 3;
+  string country = 4;
+  int32 limit = 5;
 }
 
-message Asset {
+message Incident {
   int32 doc_id = 1;
-  string internal_id = 2;
-  string ticker = 3;
-  string category = 4;
-  double price_eur = 5;
-  double price_usd = 6;
-  double volume = 7;
-  double fx_eur_usd = 8;
-  string processed_at_utc = 9;
+  string incident_id = 2;
+  string source = 3;
+  string incident_type = 4;
+  string severity = 5;
+  string status = 6;
+
+  string city = 7;
+  string country = 8;
+  string continent = 9;
+
+  double lat = 10;
+  double lon = 11;
+  double accuracy_m = 12;
+
+  string reported_at = 13;
+  string validated_at = 14;
+  string resolved_at = 15;
+  string last_update_utc = 16;
+
+  string assigned_unit = 17;
+  double resources_count = 18;
+  double eta_min = 19;
+  double response_time_min = 20;
+
+  double estimated_cost_eur = 21;
+  double risk_score = 22;
 }
 
-message QueryAssetsResponse {
-  repeated Asset assets = 1;
+message QueryIncidentsResponse {
+  repeated Incident incidents = 1;
 }
 
-message CategoryAggRequest {}
+// ------------------------
+// AggByType
+// ------------------------
+message AggByTypeRequest {}
 
-message CategoryAggRow {
-  string category = 1;
-  int32 total_assets = 2;
-  double total_volume = 3;
-  double avg_price_eur = 4;
-  double avg_price_usd = 5;
+message AggByTypeRow {
+  string incident_type = 1;
+  int32 total_incidents = 2;
+  double avg_risk_score = 3;
+  double total_estimated_cost_eur = 4;
 }
 
-message CategoryAggResponse {
-  repeated CategoryAggRow rows = 1;
+message AggByTypeResponse {
+  repeated AggByTypeRow rows = 1;
+}
+
+// ------------------------
+// AggBySeverity
+// ------------------------
+message AggBySeverityRequest {}
+
+message AggBySeverityRow {
+  string severity = 1;
+  int32 total_incidents = 2;
+  double avg_risk_score = 3;
+}
+
+message AggBySeverityResponse {
+  repeated AggBySeverityRow rows = 1;
 }

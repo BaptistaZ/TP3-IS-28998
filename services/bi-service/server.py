@@ -13,9 +13,10 @@ from starlette.applications import Starlette
 from starlette.responses import JSONResponse
 from starlette.routing import Route, Mount
 
-from generated import bi_pb2, bi_pb2_grpc 
+import bi_pb2
+import bi_pb2_grpc
 
-load_dotenv()  
+load_dotenv()
 
 # -----------------------------
 # Config
@@ -27,8 +28,6 @@ GRPC_HOST = os.getenv("GRPC_SERVICE_HOST", "grpc-service")
 GRPC_PORT = int(os.getenv("GRPC_SERVICE_PORT", "50051"))
 
 
- 
-
 # -----------------------------
 # gRPC helpers
 # -----------------------------
@@ -37,6 +36,14 @@ def grpc_stub() -> bi_pb2_grpc.BIServiceStub:
     target = f"{GRPC_HOST}:{GRPC_PORT}"
     channel = grpc.insecure_channel(target)
     return bi_pb2_grpc.BIServiceStub(channel)
+
+
+def _safe_float(v: Any) -> Optional[float]:
+    """Convert protobuf numeric (or None) to float safely."""
+    try:
+        return float(v)
+    except Exception:
+        return None
 
 
 # -----------------------------
@@ -50,27 +57,48 @@ def map_doc(d: Any) -> Dict[str, Any]:
     }
 
 
-def map_asset(a: Any) -> Dict[str, Any]:
+def map_incident(i: Any) -> Dict[str, Any]:
+    # Map gRPC Incident -> GraphQL Incident fields
     return {
-        "docId": int(a.doc_id),
-        "internalId": str(a.internal_id),
-        "ticker": str(a.ticker),
-        "category": str(a.category),
-        "priceEur": float(a.price_eur),
-        "priceUsd": float(a.price_usd),
-        "volume": float(a.volume),
-        "fxEurUsd": float(a.fx_eur_usd),
-        "processedAtUtc": str(a.processed_at_utc),
+        "docId": int(i.doc_id),
+        "incidentId": str(i.incident_id),
+        "source": str(i.source) if i.source else None,
+        "incidentType": str(i.incident_type) if i.incident_type else None,
+        "severity": str(i.severity) if i.severity else None,
+        "status": str(i.status) if i.status else None,
+        "city": str(i.city) if i.city else None,
+        "country": str(i.country) if i.country else None,
+        "continent": str(i.continent) if i.continent else None,
+        "lat": _safe_float(i.lat),
+        "lon": _safe_float(i.lon),
+        "accuracyM": _safe_float(i.accuracy_m),
+        "reportedAt": str(i.reported_at) if i.reported_at else None,
+        "validatedAt": str(i.validated_at) if i.validated_at else None,
+        "resolvedAt": str(i.resolved_at) if i.resolved_at else None,
+        "lastUpdateUtc": str(i.last_update_utc) if i.last_update_utc else None,
+        "assignedUnit": str(i.assigned_unit) if i.assigned_unit else None,
+        "resourcesCount": _safe_float(i.resources_count),
+        "etaMin": _safe_float(i.eta_min),
+        "responseTimeMin": _safe_float(i.response_time_min),
+        "estimatedCostEur": _safe_float(i.estimated_cost_eur),
+        "riskScore": _safe_float(i.risk_score),
     }
 
 
-def map_agg(row: Any) -> Dict[str, Any]:
+def map_agg_by_type(r: Any) -> Dict[str, Any]:
     return {
-        "category": str(row.category),
-        "totalAssets": int(row.total_assets),
-        "totalVolume": float(row.total_volume),
-        "avgPriceEur": float(row.avg_price_eur),
-        "avgPriceUsd": float(row.avg_price_usd),
+        "incidentType": str(r.incident_type),
+        "totalIncidents": int(r.total_incidents),
+        "avgRiskScore": _safe_float(r.avg_risk_score),
+        "totalEstimatedCostEur": _safe_float(r.total_estimated_cost_eur),
+    }
+
+
+def map_agg_by_severity(r: Any) -> Dict[str, Any]:
+    return {
+        "severity": str(r.severity),
+        "totalIncidents": int(r.total_incidents),
+        "avgRiskScore": _safe_float(r.avg_risk_score),
     }
 
 
@@ -90,6 +118,7 @@ def resolve_health(*_) -> str:
 
 @query.field("docs")
 def resolve_docs(*_, limit: int = 10) -> List[Dict[str, Any]]:
+    """List stored XML docs (metadata only)."""
     try:
         stub = grpc_stub()
         resp = stub.ListDocs(bi_pb2.ListDocsRequest(limit=limit))
@@ -98,42 +127,61 @@ def resolve_docs(*_, limit: int = 10) -> List[Dict[str, Any]]:
         raise RuntimeError(f"gRPC ListDocs failed: {e.code().name} - {e.details()}")
 
 
-@query.field("assets")
-def resolve_assets(
+@query.field("incidents")
+def resolve_incidents(
     *_,
-    ticker: Optional[str] = None,
-    category: Optional[str] = None,
-    limit: int = 50
+    type: Optional[str] = None,
+    severity: Optional[str] = None,
+    status: Optional[str] = None,
+    country: Optional[str] = None,
+    limit: int = 50,
 ) -> List[Dict[str, Any]]:
+    """Query incidents with optional filters."""
     try:
         stub = grpc_stub()
-        resp = stub.QueryAssets(
-            bi_pb2.QueryAssetsRequest(
-                ticker=ticker or "",
-                category=category or "",
+        resp = stub.QueryIncidents(
+            bi_pb2.QueryIncidentsRequest(
+                type=type or "",
+                severity=severity or "",
+                status=status or "",
+                country=country or "",
                 limit=limit,
             )
         )
-        return [map_asset(a) for a in resp.assets]
+        return [map_incident(i) for i in resp.incidents]
     except grpc.RpcError as e:
-        raise RuntimeError(f"gRPC QueryAssets failed: {e.code().name} - {e.details()}")
+        raise RuntimeError(f"gRPC QueryIncidents failed: {e.code().name} - {e.details()}")
 
 
-@query.field("categoryAgg")
-def resolve_category_agg(*_) -> List[Dict[str, Any]]:
+@query.field("aggByType")
+def resolve_agg_by_type(*_) -> List[Dict[str, Any]]:
+    """Aggregation grouped by incident type."""
     try:
         stub = grpc_stub()
-        resp = stub.CategoryAgg(bi_pb2.CategoryAggRequest())
-        return [map_agg(r) for r in resp.rows]
+        resp = stub.AggByType(bi_pb2.AggByTypeRequest())
+        return [map_agg_by_type(r) for r in resp.rows]
     except grpc.RpcError as e:
-        raise RuntimeError(f"gRPC CategoryAgg failed: {e.code().name} - {e.details()}")
+        raise RuntimeError(f"gRPC AggByType failed: {e.code().name} - {e.details()}")
+
+
+@query.field("aggBySeverity")
+def resolve_agg_by_severity(*_) -> List[Dict[str, Any]]:
+    """Aggregation grouped by severity."""
+    try:
+        stub = grpc_stub()
+        resp = stub.AggBySeverity(bi_pb2.AggBySeverityRequest())
+        return [map_agg_by_severity(r) for r in resp.rows]
+    except grpc.RpcError as e:
+        raise RuntimeError(f"gRPC AggBySeverity failed: {e.code().name} - {e.details()}")
 
 
 schema = make_executable_schema(type_defs, query)
 app = GraphQL(schema, debug=True)
 
-def http_health(request):
+
+def http_health(_request):
     return JSONResponse({"ok": True, "service": "bi-service"})
+
 
 starlette_app = Starlette(
     routes=[
@@ -141,7 +189,6 @@ starlette_app = Starlette(
         Mount("/graphql", app),
     ]
 )
-
 
 if __name__ == "__main__":
     uvicorn.run(starlette_app, host="0.0.0.0", port=BI_PORT, log_level="info")

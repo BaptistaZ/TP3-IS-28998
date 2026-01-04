@@ -6,8 +6,9 @@ COPY services/grpc-service/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY services/grpc-service/ /app/
-
 RUN test -f /app/generated/__init__.py || touch /app/generated/__init__.py
+
+ENV PYTHONPATH=/app:/app/generated
 
 EXPOSE 50051
 CMD ["python", "server.py"]

@@ -7,7 +7,8 @@ import psycopg2
 from psycopg2.extras import RealDictCursor
 from dotenv import load_dotenv
 
-from generated import bi_pb2, bi_pb2_grpc
+import bi_pb2
+import bi_pb2_grpc
 
 load_dotenv()
 
@@ -17,10 +18,20 @@ def _to_iso(value) -> str:
         return ""
     if isinstance(value, str):
         return value
-    # Make it timezone-aware (UTC) if it isn't already
     if getattr(value, "tzinfo", None) is None:
         value = value.replace(tzinfo=timezone.utc)
     return value.isoformat().replace("+00:00", "Z")
+
+
+def _safe_float(value) -> float:
+    """Convert DB numeric to float safely."""
+    if value is None:
+        return 0.0
+    try:
+        return float(value)
+    except Exception:
+        return 0.0
+
 
 def get_db_conn():
     """Create a DB connection using env vars."""
@@ -40,11 +51,12 @@ def get_db_conn():
         password=password,
     )
 
+
 class BIService(bi_pb2_grpc.BIServiceServicer):
-    """gRPC BI Service reading XML data from Postgres using XPath/XMLTable."""
+    """gRPC BI Service reading Incident XML data from Postgres using XPath/XMLTable."""
 
     def __init__(self):
-        self.table = os.getenv("DB_TABLE", "tp3_documentos_xml")
+        self.table = os.getenv("DB_TABLE", "tp3_incidents_xml")
 
     def ListDocs(self, request, context):
         print(f"[gRPC] ListDocs(limit={request.limit})")
@@ -66,7 +78,7 @@ class BIService(bi_pb2_grpc.BIServiceServicer):
             docs = [
                 bi_pb2.Doc(
                     id=int(r["id"]),
-                    mapper_version=str(r["mapper_version"]),
+                    mapper_version=str(r["mapper_version"] or ""),
                     created_at=_to_iso(r["data_criacao"]),
                 )
                 for r in rows
@@ -79,51 +91,104 @@ class BIService(bi_pb2_grpc.BIServiceServicer):
             context.set_details(f"ListDocs DB error: {e}")
             return bi_pb2.ListDocsResponse()
 
-    def QueryAssets(self, request, context):
-        print(f"[gRPC] QueryAssets(ticker='{request.ticker}', category='{request.category}', limit={request.limit})")
-        ticker = (request.ticker or "").strip()
-        category = (request.category or "").strip()
+    def QueryIncidents(self, request, context):
+        print(
+            "[gRPC] QueryIncidents("
+            f"type='{request.type}', severity='{request.severity}', status='{request.status}', "
+            f"country='{request.country}', limit={request.limit})"
+        )
+
+        inc_type = (request.type or "").strip()
+        severity = (request.severity or "").strip()
+        status = (request.status or "").strip()
+        country = (request.country or "").strip()
         limit = request.limit if request.limit > 0 else 50
 
         params = []
         where = []
 
-        if ticker:
-            params.append(ticker)
-            where.append("x.ticker = %s")
+        if inc_type:
+            params.append(inc_type)
+            where.append("x.incident_type = %s")
+        if severity:
+            params.append(severity)
+            where.append("x.severity = %s")
+        if status:
+            params.append(status)
+            where.append("x.status = %s")
+        if country:
+            params.append(country)
+            where.append("x.country = %s")
 
-        if category:
-            params.append(category)
-            where.append("x.tipo = %s")
+        # Always avoid empty incident_id rows
+        where.append("NULLIF(x.incident_id, '') IS NOT NULL")
 
         where_sql = f"WHERE {' AND '.join(where)}" if where else ""
-
         params.append(limit)
 
         sql = f"""
             SELECT
               d.id as doc_id,
-              x.id_interno,
-              x.ticker,
-              x.tipo,
-              x.preco_eur,
-              x.preco_usd,
-              x.volume,
-              x.taxa_eurusd,
-              x.processado_utc
+
+              x.incident_id,
+              x.source,
+              x.incident_type,
+              x.severity,
+              x.status,
+
+              x.city,
+              x.country,
+              x.continent,
+
+              NULLIF(x.lat_txt, '')::numeric as lat,
+              NULLIF(x.lon_txt, '')::numeric as lon,
+              NULLIF(x.accuracy_m_txt, '')::numeric as accuracy_m,
+
+              x.reported_at,
+              x.validated_at,
+              x.resolved_at,
+              x.last_update_utc,
+
+              x.assigned_unit,
+
+              NULLIF(x.resources_count_txt, '')::numeric as resources_count,
+              NULLIF(x.eta_min_txt, '')::numeric as eta_min,
+              NULLIF(x.response_time_min_txt, '')::numeric as response_time_min,
+
+              NULLIF(x.estimated_cost_eur_txt, '')::numeric as estimated_cost_eur,
+              NULLIF(x.risk_score_txt, '')::numeric as risk_score
+
             FROM {self.table} d
             JOIN LATERAL xmltable(
-              '/RelatorioConformidade/Ativos/Ativo'
+              '/IncidentReport/Incidents/Incident'
               PASSING d.xml_documento
               COLUMNS
-                id_interno     text    PATH '@IDInterno',
-                ticker         text    PATH '@Ticker',
-                tipo           text    PATH '@Tipo',
-                preco_eur      numeric PATH 'DetalheNegociacao/PrecoAtual/text()',
-                preco_usd      numeric PATH 'DetalheNegociacao/PrecoUSD/text()',
-                volume         numeric PATH 'DetalheNegociacao/Volume/text()',
-                taxa_eurusd    numeric PATH 'EnriquecimentoFX/TaxaEURUSD/text()',
-                processado_utc text    PATH 'EnriquecimentoFX/ProcessadoEmUTC/text()'
+                incident_id            text PATH '@IncidentId',
+                source                 text PATH '@Source',
+                incident_type          text PATH '@Type',
+                severity               text PATH '@Severity',
+                status                 text PATH '@Status',
+
+                city                   text PATH 'Location/@City',
+                country                text PATH 'Location/@Country',
+                continent              text PATH 'Location/@Continent',
+
+                accuracy_m_txt         text PATH 'Location/@AccuracyMeters',
+                lat_txt                text PATH 'Location/Coordinates/@Lat',
+                lon_txt                text PATH 'Location/Coordinates/@Lon',
+
+                reported_at            text PATH 'Timeline/ReportedAt/text()',
+                validated_at           text PATH 'Timeline/ValidatedAt/text()',
+                resolved_at            text PATH 'Timeline/ResolvedAt/text()',
+                last_update_utc        text PATH 'Timeline/LastUpdateUTC/text()',
+
+                assigned_unit          text PATH 'Response/AssignedUnit/text()',
+                resources_count_txt    text PATH 'Response/ResourcesCount/text()',
+                eta_min_txt            text PATH 'Response/EtaMinutes/text()',
+                response_time_min_txt  text PATH 'Response/ResponseTimeMinutes/text()',
+
+                estimated_cost_eur_txt text PATH 'Assessment/EstimatedCostEUR/text()',
+                risk_score_txt         text PATH 'Assessment/RiskScore/text()'
             ) x ON true
             {where_sql}
             ORDER BY d.id DESC
@@ -136,50 +201,63 @@ class BIService(bi_pb2_grpc.BIServiceServicer):
                     cur.execute(sql, tuple(params))
                     rows = cur.fetchall()
 
-            assets = []
+            incidents = []
             for r in rows:
-                assets.append(
-                    bi_pb2.Asset(
+                incidents.append(
+                    bi_pb2.Incident(
                         doc_id=int(r["doc_id"]),
-                        internal_id=str(r["id_interno"] or ""),
-                        ticker=str(r["ticker"] or ""),
-                        category=str(r["tipo"] or ""),
-                        price_eur=float(r["preco_eur"] or 0),
-                        price_usd=float(r["preco_usd"] or 0),
-                        volume=float(r["volume"] or 0),
-                        fx_eur_usd=float(r["taxa_eurusd"] or 0),
-                        processed_at_utc=str(r["processado_utc"] or ""),
+                        incident_id=str(r["incident_id"] or ""),
+                        source=str(r["source"] or ""),
+                        incident_type=str(r["incident_type"] or ""),
+                        severity=str(r["severity"] or ""),
+                        status=str(r["status"] or ""),
+                        city=str(r["city"] or ""),
+                        country=str(r["country"] or ""),
+                        continent=str(r["continent"] or ""),
+                        lat=_safe_float(r["lat"]),
+                        lon=_safe_float(r["lon"]),
+                        accuracy_m=_safe_float(r["accuracy_m"]),
+                        reported_at=str(r["reported_at"] or ""),
+                        validated_at=str(r["validated_at"] or ""),
+                        resolved_at=str(r["resolved_at"] or ""),
+                        last_update_utc=str(r["last_update_utc"] or ""),
+                        assigned_unit=str(r["assigned_unit"] or ""),
+                        resources_count=_safe_float(r["resources_count"]),
+                        eta_min=_safe_float(r["eta_min"]),
+                        response_time_min=_safe_float(r["response_time_min"]),
+                        estimated_cost_eur=_safe_float(r["estimated_cost_eur"]),
+                        risk_score=_safe_float(r["risk_score"]),
                     )
                 )
 
-            return bi_pb2.QueryAssetsResponse(assets=assets)
+            return bi_pb2.QueryIncidentsResponse(incidents=incidents)
 
         except Exception as e:
             context.set_code(grpc.StatusCode.INTERNAL)
-            context.set_details(f"QueryAssets DB error: {e}")
-            return bi_pb2.QueryAssetsResponse()
+            context.set_details(f"QueryIncidents DB error: {e}")
+            return bi_pb2.QueryIncidentsResponse()
 
-    def CategoryAgg(self, request, context):
-        print("[gRPC] CategoryAgg()")
+    def AggByType(self, request, context):
+        print("[gRPC] AggByType()")
+
         sql = f"""
             SELECT
-              x.tipo as category,
-              COUNT(*) as total_assets,
-              SUM(x.volume) as total_volume,
-              AVG(x.preco_eur) as avg_price_eur,
-              AVG(x.preco_usd) as avg_price_usd
+              x.incident_type as incident_type,
+              COUNT(*) as total_incidents,
+              AVG(NULLIF(x.risk_score_txt, '')::numeric) as avg_risk_score,
+              SUM(NULLIF(x.estimated_cost_eur_txt, '')::numeric) as total_estimated_cost_eur
             FROM {self.table} d
             JOIN LATERAL xmltable(
-              '/RelatorioConformidade/Ativos/Ativo'
+              '/IncidentReport/Incidents/Incident'
               PASSING d.xml_documento
               COLUMNS
-                tipo      text    PATH '@Tipo',
-                volume    numeric PATH 'DetalheNegociacao/Volume/text()',
-                preco_eur numeric PATH 'DetalheNegociacao/PrecoAtual/text()',
-                preco_usd numeric PATH 'DetalheNegociacao/PrecoUSD/text()'
+                incident_type           text PATH '@Type',
+                risk_score_txt          text PATH 'Assessment/RiskScore/text()',
+                estimated_cost_eur_txt  text PATH 'Assessment/EstimatedCostEUR/text()'
             ) x ON true
-            GROUP BY x.tipo
-            ORDER BY total_volume DESC NULLS LAST;
+            WHERE NULLIF(x.incident_type, '') IS NOT NULL
+            GROUP BY x.incident_type
+            ORDER BY total_estimated_cost_eur DESC NULLS LAST;
         """
 
         try:
@@ -191,21 +269,64 @@ class BIService(bi_pb2_grpc.BIServiceServicer):
             out_rows = []
             for r in rows:
                 out_rows.append(
-                    bi_pb2.CategoryAggRow(
-                        category=str(r["category"] or ""),
-                        total_assets=int(r["total_assets"] or 0),
-                        total_volume=float(r["total_volume"] or 0),
-                        avg_price_eur=float(r["avg_price_eur"] or 0),
-                        avg_price_usd=float(r["avg_price_usd"] or 0),
+                    bi_pb2.AggByTypeRow(
+                        incident_type=str(r["incident_type"] or ""),
+                        total_incidents=int(r["total_incidents"] or 0),
+                        avg_risk_score=_safe_float(r["avg_risk_score"]),
+                        total_estimated_cost_eur=_safe_float(r["total_estimated_cost_eur"]),
                     )
                 )
 
-            return bi_pb2.CategoryAggResponse(rows=out_rows)
+            return bi_pb2.AggByTypeResponse(rows=out_rows)
 
         except Exception as e:
             context.set_code(grpc.StatusCode.INTERNAL)
-            context.set_details(f"CategoryAgg DB error: {e}")
-            return bi_pb2.CategoryAggResponse()
+            context.set_details(f"AggByType DB error: {e}")
+            return bi_pb2.AggByTypeResponse()
+
+    def AggBySeverity(self, request, context):
+        print("[gRPC] AggBySeverity()")
+
+        sql = f"""
+            SELECT
+              x.severity as severity,
+              COUNT(*) as total_incidents,
+              AVG(NULLIF(x.risk_score_txt, '')::numeric) as avg_risk_score
+            FROM {self.table} d
+            JOIN LATERAL xmltable(
+              '/IncidentReport/Incidents/Incident'
+              PASSING d.xml_documento
+              COLUMNS
+                severity       text PATH '@Severity',
+                risk_score_txt text PATH 'Assessment/RiskScore/text()'
+            ) x ON true
+            WHERE NULLIF(x.severity, '') IS NOT NULL
+            GROUP BY x.severity
+            ORDER BY total_incidents DESC;
+        """
+
+        try:
+            with get_db_conn() as conn:
+                with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                    cur.execute(sql)
+                    rows = cur.fetchall()
+
+            out_rows = []
+            for r in rows:
+                out_rows.append(
+                    bi_pb2.AggBySeverityRow(
+                        severity=str(r["severity"] or ""),
+                        total_incidents=int(r["total_incidents"] or 0),
+                        avg_risk_score=_safe_float(r["avg_risk_score"]),
+                    )
+                )
+
+            return bi_pb2.AggBySeverityResponse(rows=out_rows)
+
+        except Exception as e:
+            context.set_code(grpc.StatusCode.INTERNAL)
+            context.set_details(f"AggBySeverity DB error: {e}")
+            return bi_pb2.AggBySeverityResponse()
 
 
 def serve():

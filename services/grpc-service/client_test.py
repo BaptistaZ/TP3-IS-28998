@@ -22,22 +22,42 @@ def main():
     for d in r1.docs:
         print(f" - id={d.id} mapper_version={d.mapper_version} created_at={d.created_at}")
 
-    # 2) QueryAssets
-    print("\n[Client] QueryAssets(ticker='IPVC', limit=10)")
-    r2 = stub.QueryAssets(bi_pb2.QueryAssetsRequest(ticker="IPVC", category="", limit=10))
-    for a in r2.assets:
+    # 2) QueryIncidents (exemplo com filtros opcionais)
+    print("\n[Client] QueryIncidents(type='medical', severity='', status='', country='', limit=5)")
+    r2 = stub.QueryIncidents(
+        bi_pb2.QueryIncidentsRequest(
+            type="medical",
+            severity="",
+            status="",
+            country="",
+            limit=5,
+        )
+    )
+    for it in r2.incidents:
         print(
-            f" - doc_id={a.doc_id} internal_id={a.internal_id} ticker={a.ticker} "
-            f"category={a.category} price_eur={a.price_eur} volume={a.volume} fx={a.fx_eur_usd}"
+            " - "
+            f"doc_id={it.doc_id} incident_id={it.incident_id} "
+            f"type={it.incident_type} severity={it.severity} status={it.status} "
+            f"country={it.country} city={it.city} "
+            f"risk_score={it.risk_score:.3f} estimated_cost_eur={it.estimated_cost_eur:.2f}"
         )
 
-    # 3) CategoryAgg
-    print("\n[Client] CategoryAgg()")
-    r3 = stub.CategoryAgg(bi_pb2.CategoryAggRequest())
+    # 3) AggByType
+    print("\n[Client] AggByType()")
+    r3 = stub.AggByType(bi_pb2.AggByTypeRequest())
     for row in r3.rows:
         print(
-            f" - category={row.category} total_assets={row.total_assets} "
-            f"total_volume={row.total_volume} avg_price_eur={row.avg_price_eur} avg_price_usd={row.avg_price_usd}"
+            f" - incident_type={row.incident_type} total_incidents={row.total_incidents} "
+            f"avg_risk_score={row.avg_risk_score:.6f} total_estimated_cost_eur={row.total_estimated_cost_eur:.2f}"
+        )
+
+    # 4) AggBySeverity
+    print("\n[Client] AggBySeverity()")
+    r4 = stub.AggBySeverity(bi_pb2.AggBySeverityRequest())
+    for row in r4.rows:
+        print(
+            f" - severity={row.severity} total_incidents={row.total_incidents} "
+            f"avg_risk_score={row.avg_risk_score:.6f}"
         )
 
 

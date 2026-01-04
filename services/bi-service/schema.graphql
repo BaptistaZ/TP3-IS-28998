@@ -4,24 +4,42 @@ type Doc {
   createdAt: String!
 }
 
-type Asset {
+type Incident {
   docId: Int!
-  internalId: String!
-  ticker: String!
-  category: String!
-  priceEur: Float
-  priceUsd: Float
-  volume: Float
-  fxEurUsd: Float
-  processedAtUtc: String
+  incidentId: String!
+  source: String
+  incidentType: String
+  severity: String
+  status: String
+  city: String
+  country: String
+  continent: String
+  lat: Float
+  lon: Float
+  accuracyM: Float
+  reportedAt: String
+  validatedAt: String
+  resolvedAt: String
+  lastUpdateUtc: String
+  assignedUnit: String
+  resourcesCount: Float
+  etaMin: Float
+  responseTimeMin: Float
+  estimatedCostEur: Float
+  riskScore: Float
 }
 
-type CategoryAgg {
-  category: String!
-  totalAssets: Int!
-  totalVolume: Float
-  avgPriceEur: Float
-  avgPriceUsd: Float
+type AggByTypeRow {
+  incidentType: String!
+  totalIncidents: Int!
+  avgRiskScore: Float
+  totalEstimatedCostEur: Float
+}
+
+type AggBySeverityRow {
+  severity: String!
+  totalIncidents: Int!
+  avgRiskScore: Float
 }
 
 type Query {
@@ -29,11 +47,14 @@ type Query {
 
   docs(limit: Int = 10): [Doc!]!
 
-  assets(
-    ticker: String
-    category: String
+  incidents(
+    type: String
+    severity: String
+    status: String
+    country: String
     limit: Int = 50
-  ): [Asset!]!
+  ): [Incident!]!
 
-  categoryAgg: [CategoryAgg!]!
+  aggByType: [AggByTypeRow!]!
+  aggBySeverity: [AggBySeverityRow!]!
 }

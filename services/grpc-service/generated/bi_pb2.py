@@ -24,7 +24,7 @@ _sym_db = _symbol_database.Default()
 
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x08\x62i.proto\x12\x02\x62i\" \n\x0fListDocsRequest\x12\r\n\x05limit\x18\x01 \x01(\x05\"=\n\x03\x44oc\x12\n\n\x02id\x18\x01 \x01(\x05\x12\x16\n\x0emapper_version\x18\x02 \x01(\t\x12\x12\n\ncreated_at\x18\x03 \x01(\t\")\n\x10ListDocsResponse\x12\x15\n\x04\x64ocs\x18\x01 \x03(\x0b\x32\x07.bi.Doc\"E\n\x12QueryAssetsRequest\x12\x0e\n\x06ticker\x18\x01 \x01(\t\x12\x10\n\x08\x63\x61tegory\x18\x02 \x01(\t\x12\r\n\x05limit\x18\x03 \x01(\x05\"\xb2\x01\n\x05\x41sset\x12\x0e\n\x06\x64oc_id\x18\x01 \x01(\x05\x12\x13\n\x0binternal_id\x18\x02 \x01(\t\x12\x0e\n\x06ticker\x18\x03 \x01(\t\x12\x10\n\x08\x63\x61tegory\x18\x04 \x01(\t\x12\x11\n\tprice_eur\x18\x05 \x01(\x01\x12\x11\n\tprice_usd\x18\x06 \x01(\x01\x12\x0e\n\x06volume\x18\x07 \x01(\x01\x12\x12\n\nfx_eur_usd\x18\x08 \x01(\x01\x12\x18\n\x10processed_at_utc\x18\t \x01(\t\"0\n\x13QueryAssetsResponse\x12\x19\n\x06\x61ssets\x18\x01 \x03(\x0b\x32\t.bi.Asset\"\x14\n\x12\x43\x61tegoryAggRequest\"|\n\x0e\x43\x61tegoryAggRow\x12\x10\n\x08\x63\x61tegory\x18\x01 \x01(\t\x12\x14\n\x0ctotal_assets\x18\x02 \x01(\x05\x12\x14\n\x0ctotal_volume\x18\x03 \x01(\x01\x12\x15\n\ravg_price_eur\x18\x04 \x01(\x01\x12\x15\n\ravg_price_usd\x18\x05 \x01(\x01\"7\n\x13\x43\x61tegoryAggResponse\x12 \n\x04rows\x18\x01 \x03(\x0b\x32\x12.bi.CategoryAggRow2\xc2\x01\n\tBIService\x12\x35\n\x08ListDocs\x12\x13.bi.ListDocsRequest\x1a\x14.bi.ListDocsResponse\x12>\n\x0bQueryAssets\x12\x16.bi.QueryAssetsRequest\x1a\x17.bi.QueryAssetsResponse\x12>\n\x0b\x43\x61tegoryAgg\x12\x16.bi.CategoryAggRequest\x1a\x17.bi.CategoryAggResponseb\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x08\x62i.proto\x12\x02\x62i\" \n\x0fListDocsRequest\x12\r\n\x05limit\x18\x01 \x01(\x05\"=\n\x03\x44oc\x12\n\n\x02id\x18\x01 \x01(\x05\x12\x16\n\x0emapper_version\x18\x02 \x01(\t\x12\x12\n\ncreated_at\x18\x03 \x01(\t\")\n\x10ListDocsResponse\x12\x15\n\x04\x64ocs\x18\x01 \x03(\x0b\x32\x07.bi.Doc\"g\n\x15QueryIncidentsRequest\x12\x0c\n\x04type\x18\x01 \x01(\t\x12\x10\n\x08severity\x18\x02 \x01(\t\x12\x0e\n\x06status\x18\x03 \x01(\t\x12\x0f\n\x07\x63ountry\x18\x04 \x01(\t\x12\r\n\x05limit\x18\x05 \x01(\x05\"\xbd\x03\n\x08Incident\x12\x0e\n\x06\x64oc_id\x18\x01 \x01(\x05\x12\x13\n\x0bincident_id\x18\x02 \x01(\t\x12\x0e\n\x06source\x18\x03 \x01(\t\x12\x15\n\rincident_type\x18\x04 \x01(\t\x12\x10\n\x08severity\x18\x05 \x01(\t\x12\x0e\n\x06status\x18\x06 \x01(\t\x12\x0c\n\x04\x63ity\x18\x07 \x01(\t\x12\x0f\n\x07\x63ountry\x18\x08 \x01(\t\x12\x11\n\tcontinent\x18\t \x01(\t\x12\x0b\n\x03lat\x18\n \x01(\x01\x12\x0b\n\x03lon\x18\x0b \x01(\x01\x12\x12\n\naccuracy_m\x18\x0c \x01(\x01\x12\x13\n\x0breported_at\x18\r \x01(\t\x12\x14\n\x0cvalidated_at\x18\x0e \x01(\t\x12\x13\n\x0bresolved_at\x18\x0f \x01(\t\x12\x17\n\x0flast_update_utc\x18\x10 \x01(\t\x12\x15\n\rassigned_unit\x18\x11 \x01(\t\x12\x17\n\x0fresources_count\x18\x12 \x01(\x01\x12\x0f\n\x07\x65ta_min\x18\x13 \x01(\x01\x12\x19\n\x11response_time_min\x18\x14 \x01(\x01\x12\x1a\n\x12\x65stimated_cost_eur\x18\x15 \x01(\x01\x12\x12\n\nrisk_score\x18\x16 \x01(\x01\"9\n\x16QueryIncidentsResponse\x12\x1f\n\tincidents\x18\x01 \x03(\x0b\x32\x0c.bi.Incident\"\x12\n\x10\x41ggByTypeRequest\"x\n\x0c\x41ggByTypeRow\x12\x15\n\rincident_type\x18\x01 \x01(\t\x12\x17\n\x0ftotal_incidents\x18\x02 \x01(\x05\x12\x16\n\x0e\x61vg_risk_score\x18\x03 \x01(\x01\x12 \n\x18total_estimated_cost_eur\x18\x04 \x01(\x01\"3\n\x11\x41ggByTypeResponse\x12\x1e\n\x04rows\x18\x01 \x03(\x0b\x32\x10.bi.AggByTypeRow\"\x16\n\x14\x41ggBySeverityRequest\"U\n\x10\x41ggBySeverityRow\x12\x10\n\x08severity\x18\x01 \x01(\t\x12\x17\n\x0ftotal_incidents\x18\x02 \x01(\x05\x12\x16\n\x0e\x61vg_risk_score\x18\x03 \x01(\x01\";\n\x15\x41ggBySeverityResponse\x12\"\n\x04rows\x18\x01 \x03(\x0b\x32\x14.bi.AggBySeverityRow2\x8b\x02\n\tBIService\x12\x35\n\x08ListDocs\x12\x13.bi.ListDocsRequest\x1a\x14.bi.ListDocsResponse\x12G\n\x0eQueryIncidents\x12\x19.bi.QueryIncidentsRequest\x1a\x1a.bi.QueryIncidentsResponse\x12\x38\n\tAggByType\x12\x14.bi.AggByTypeRequest\x1a\x15.bi.AggByTypeResponse\x12\x44\n\rAggBySeverity\x12\x18.bi.AggBySeverityRequest\x1a\x19.bi.AggBySeverityResponseb\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
@@ -37,18 +37,24 @@ if not _descriptor._USE_C_DESCRIPTORS:
   _globals['_DOC']._serialized_end=111
   _globals['_LISTDOCSRESPONSE']._serialized_start=113
   _globals['_LISTDOCSRESPONSE']._serialized_end=154
-  _globals['_QUERYASSETSREQUEST']._serialized_start=156
-  _globals['_QUERYASSETSREQUEST']._serialized_end=225
-  _globals['_ASSET']._serialized_start=228
-  _globals['_ASSET']._serialized_end=406
-  _globals['_QUERYASSETSRESPONSE']._serialized_start=408
-  _globals['_QUERYASSETSRESPONSE']._serialized_end=456
-  _globals['_CATEGORYAGGREQUEST']._serialized_start=458
-  _globals['_CATEGORYAGGREQUEST']._serialized_end=478
-  _globals['_CATEGORYAGGROW']._serialized_start=480
-  _globals['_CATEGORYAGGROW']._serialized_end=604
-  _globals['_CATEGORYAGGRESPONSE']._serialized_start=606
-  _globals['_CATEGORYAGGRESPONSE']._serialized_end=661
-  _globals['_BISERVICE']._serialized_start=664
-  _globals['_BISERVICE']._serialized_end=858
+  _globals['_QUERYINCIDENTSREQUEST']._serialized_start=156
+  _globals['_QUERYINCIDENTSREQUEST']._serialized_end=259
+  _globals['_INCIDENT']._serialized_start=262
+  _globals['_INCIDENT']._serialized_end=707
+  _globals['_QUERYINCIDENTSRESPONSE']._serialized_start=709
+  _globals['_QUERYINCIDENTSRESPONSE']._serialized_end=766
+  _globals['_AGGBYTYPEREQUEST']._serialized_start=768
+  _globals['_AGGBYTYPEREQUEST']._serialized_end=786
+  _globals['_AGGBYTYPEROW']._serialized_start=788
+  _globals['_AGGBYTYPEROW']._serialized_end=908
+  _globals['_AGGBYTYPERESPONSE']._serialized_start=910
+  _globals['_AGGBYTYPERESPONSE']._serialized_end=961
+  _globals['_AGGBYSEVERITYREQUEST']._serialized_start=963
+  _globals['_AGGBYSEVERITYREQUEST']._serialized_end=985
+  _globals['_AGGBYSEVERITYROW']._serialized_start=987
+  _globals['_AGGBYSEVERITYROW']._serialized_end=1072
+  _globals['_AGGBYSEVERITYRESPONSE']._serialized_start=1074
+  _globals['_AGGBYSEVERITYRESPONSE']._serialized_end=1133
+  _globals['_BISERVICE']._serialized_start=1136
+  _globals['_BISERVICE']._serialized_end=1403
 # @@protoc_insertion_point(module_scope)
