@@ -12,7 +12,7 @@ import express from "express";
 import multer from "multer";
 import axios from "axios";
 
-import { listDocs, queryAtivos, aggByCategory } from "./queries.js";
+import { listDocs, queryIncidents, aggByType, aggBySeverity } from "./queries.js";
 import { insertXmlDocument } from "./db.js";
 import { IngestSchema, parseMappedCsv, buildXml } from "./xml.js";
 
@@ -31,17 +31,24 @@ app.get("/docs", async (req, res) => {
   res.json({ ok: true, docs });
 });
 
-app.get("/query/ativos", async (req, res) => {
-  const ticker = req.query.ticker?.toString();
-  const category = req.query.category?.toString();
+app.get("/query/incidents", async (req, res) => {
+  const type = req.query.type?.toString();
+  const severity = req.query.severity?.toString();
+  const status = req.query.status?.toString();
+  const country = req.query.country?.toString();
   const limit = Number(req.query.limit || 50);
 
-  const rows = await queryAtivos({ ticker, category, limit });
+  const rows = await queryIncidents({ type, severity, status, country, limit });
   res.json({ ok: true, count: rows.length, rows });
 });
 
-app.get("/query/agg/category", async (_req, res) => {
-  const rows = await aggByCategory();
+app.get("/query/agg/type", async (_req, res) => {
+  const rows = await aggByType();
+  res.json({ ok: true, rows });
+});
+
+app.get("/query/agg/severity", async (_req, res) => {
+  const rows = await aggBySeverity();
   res.json({ ok: true, rows });
 });
 
