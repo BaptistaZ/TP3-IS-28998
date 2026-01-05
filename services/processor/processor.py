@@ -6,6 +6,7 @@ import csv
 import io
 from typing import Dict, Any, List
 from xmlrpc.client import ServerProxy
+from weather_client import fetch_weather
 
 import boto3
 from botocore.client import Config
@@ -36,6 +37,9 @@ FX_URL = os.getenv(
 
 STATE_PATH = os.path.join(TMP_DIR, "processor_state.json")
 
+# Progress logs
+PROGRESS_EVERY = int(os.getenv("PROCESSOR_PROGRESS_EVERY", "2000"))
+
 
 # -----------------------------
 # XML Service integration
@@ -51,8 +55,12 @@ def send_to_xml_service(mapped_csv_path: str, source_key: str) -> Dict[str, Any]
 
     Returns the XML Service JSON response (sync response).
     """
-    ingest_url = os.getenv("XML_SERVICE_INGEST_URL", "http://localhost:7001/ingest")
-    webhook_url = os.getenv("PROCESSOR_WEBHOOK_URL", "http://localhost:8000/webhook/xml-status")
+    ingest_url = os.getenv("XML_SERVICE_INGEST_URL",
+                           "http://localhost:7001/ingest")
+    webhook_url = os.getenv(
+        "PROCESSOR_WEBHOOK_URL",
+        "http://localhost:8000/webhook/xml-status"
+    )
     mapper_version = os.getenv("MAPPER_VERSION", "1.0.0")
     timeout_s = int(os.getenv("XML_SERVICE_TIMEOUT_SECONDS", "20"))
     prefix = os.getenv("PROCESSOR_REQUEST_ID_PREFIX", "Processor")
@@ -63,14 +71,16 @@ def send_to_xml_service(mapped_csv_path: str, source_key: str) -> Dict[str, Any]
     request_id = f"{prefix}_{safe_key}_{ts}"
 
     with open(mapped_csv_path, "rb") as f:
-        files = {"mapped_csv": (os.path.basename(mapped_csv_path), f, "text/csv")}
+        files = {"mapped_csv": (os.path.basename(
+            mapped_csv_path), f, "text/csv")}
         data = {
             "request_id": request_id,
             "mapper_version": mapper_version,
             "webhook_url": webhook_url,
         }
 
-        r = requests.post(ingest_url, data=data, files=files, timeout=timeout_s)
+        r = requests.post(ingest_url, data=data,
+                          files=files, timeout=timeout_s)
         r.raise_for_status()
         return r.json()
 
@@ -84,7 +94,8 @@ def s3_client():
         endpoint_url=ENDPOINT,
         aws_access_key_id=ACCESS_KEY,
         aws_secret_access_key=SECRET_KEY,
-        config=Config(signature_version="s3v4", s3={"addressing_style": "path"}),
+        config=Config(signature_version="s3v4", s3={
+                      "addressing_style": "path"}),
         region_name=REGION,
     )
 
@@ -120,7 +131,6 @@ def save_state(state: Dict[str, Any]):
 # -----------------------------
 # External enrichment
 # -----------------------------
-
 def _to_float(value: Any) -> float:
     # xmlrpc pode devolver coisas "estranhas" para o type-checker
     if isinstance(value, (int, float)):
@@ -144,20 +154,16 @@ def fetch_fx_eur_usd():
     rpc_url = f"http://{rpc_host}:{rpc_port}/RPC2"
 
     try:
-        # XML-RPC call (Protocol: RPC/XML-RPC)
         client = ServerProxy(rpc_url, allow_none=True)
-
         rate = client.get_eur_usd_rate()
         rate_f = _to_float(rate)
 
-        # Evidence: confirms the FX rate was obtained via XML-RPC
         print(f"[Processor] FX via XML-RPC OK -> {rate_f}")
-
         return rate_f
 
     except Exception as e:
-        # Fallback to REST FX API (keeps pipeline resilient)
-        print(f"[Processor] XML-RPC unavailable, fallback to REST FX API. Reason: {e}")
+        print(
+            f"[Processor] XML-RPC unavailable, fallback to REST FX API. Reason: {e}")
 
         r = requests.get(FX_URL, timeout=8)
         r.raise_for_status()
@@ -201,7 +207,13 @@ def download_object_to_memory(s3, key: str) -> io.StringIO:
 def write_mapped_csv(local_path: str, input_stream: io.StringIO, fx_usd: float):
     """
     Stream read + stream write (row by row).
+    Inclui enrichment weather (controlado por WEATHER_ENABLED no weather_client.py).
+    Inclui também um "budget" de chamadas por ficheiro para evitar desastres.
     """
+
+    MAX_WEATHER_CALLS_PER_FILE = int(
+        os.getenv("MAX_WEATHER_CALLS_PER_FILE", "300"))
+
     reader = csv.DictReader(input_stream)
 
     fieldnames = [
@@ -231,6 +243,12 @@ def write_mapped_csv(local_path: str, input_stream: io.StringIO, fx_usd: float):
         "tags",
         "notes",
         "fx_eur_usd",
+        "weather_source",
+        "weather_temperature_c",
+        "weather_wind_kmh",
+        "weather_precip_mm",
+        "weather_code",
+        "weather_time_utc",
         "mapper_version",
         "processed_at_utc",
     ]
@@ -238,14 +256,84 @@ def write_mapped_csv(local_path: str, input_stream: io.StringIO, fx_usd: float):
     processed_at = datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
     mapper_version = os.getenv("MAPPER_VERSION", "1.0.0")
 
+    # Cache local adicional (por ficheiro) - ALINHADA com weather_client (2 casas decimais)
+    weather_cache: Dict[tuple, dict] = {}
+
+    # Defaults para não rebentar schema a jusante
+    empty_weather = {
+        "weather_source": "",
+        "weather_temperature_c": "",
+        "weather_wind_kmh": "",
+        "weather_precip_mm": "",
+        "weather_code": "",
+        "weather_time_utc": "",
+    }
+
+    # Stats (para perceber se está a funcionar e não "rebenta" o pipeline)
+    weather_calls = 0        # chamadas reais ao serviço (após budget)
+    weather_hits = 0         # hits de cache (por ficheiro)
+    weather_misses = 0       # chamadas que devolveram dados e foram guardadas em cache
+    weather_skipped = 0      # não chamou porque esgotou budget
+
+    t0 = time.time()
+    rows_written = 0
+
     with open(local_path, "w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
 
         for row in reader:
+            rows_written += 1
+
+            # progress log
+            if PROGRESS_EVERY > 0 and (rows_written % PROGRESS_EVERY == 0):
+                elapsed = time.time() - t0
+                rps = rows_written / elapsed if elapsed > 0 else 0.0
+                print(
+                    f"[Processor] mapping... rows={rows_written} elapsed={elapsed:.1f}s (~{rps:.1f} rows/s)")
+
+            # custo
             cost_eur_str = (row.get("estimated_cost_eur") or "").strip()
             cost_eur = float(cost_eur_str) if cost_eur_str else 0.0
             cost_usd = round(cost_eur * fx_usd, 6)
+
+            # --- Weather enrichment (external API) ---
+            weather = None
+            try:
+                lat_raw = (row.get("lat") or "").strip()
+                lon_raw = (row.get("lon") or "").strip()
+
+                if lat_raw and lon_raw:
+                    lat = float(lat_raw)
+                    lon = float(lon_raw)
+
+                    # Normaliza para 2 casas decimais (deve bater com o weather_client)
+                    ROUND_DECIMALS = int(os.getenv("WEATHER_ROUND_DECIMALS", "1"))
+                    lat2 = round(lat, ROUND_DECIMALS)
+                    lon2 = round(lon, ROUND_DECIMALS)
+                    wkey = (lat2, lon2)
+
+                    if wkey in weather_cache:
+                        weather = weather_cache[wkey]
+                        weather_hits += 1
+                    else:
+                        # budget de chamadas por ficheiro
+                        if weather_calls < MAX_WEATHER_CALLS_PER_FILE:
+                            weather_calls += 1
+                            weather = fetch_weather(lat2, lon2)
+
+                            # fetch_weather pode devolver None (disabled/fail)
+                            if weather:
+                                weather_cache[wkey] = weather
+                                weather_misses += 1
+                        else:
+                            weather_skipped += 1
+
+            except Exception:
+                weather = None
+
+            if not weather:
+                weather = empty_weather
 
             writer.writerow({
                 "incident_id": row.get("incident_id", ""),
@@ -274,9 +362,27 @@ def write_mapped_csv(local_path: str, input_stream: io.StringIO, fx_usd: float):
                 "tags": row.get("tags", ""),
                 "notes": row.get("notes", ""),
                 "fx_eur_usd": fx_usd,
+                "weather_source": weather.get("weather_source", ""),
+                "weather_temperature_c": weather.get("weather_temperature_c", ""),
+                "weather_wind_kmh": weather.get("weather_wind_kmh", ""),
+                "weather_precip_mm": weather.get("weather_precip_mm", ""),
+                "weather_code": weather.get("weather_code", ""),
+                "weather_time_utc": weather.get("weather_time_utc", ""),
                 "mapper_version": mapper_version,
                 "processed_at_utc": processed_at,
             })
+
+    elapsed = time.time() - t0
+    rps = rows_written / elapsed if elapsed > 0 else 0.0
+
+    print(
+        f"[Processor] mapping done -> rows={rows_written} elapsed={elapsed:.1f}s (~{rps:.1f} rows/s)")
+    print(
+        "[Processor] weather stats -> "
+        f"budget={MAX_WEATHER_CALLS_PER_FILE} "
+        f"calls={weather_calls} hits={weather_hits} misses={weather_misses} skipped={weather_skipped} "
+        f"cache_entries={len(weather_cache)}"
+    )
 
 
 def upload_processed_csv(s3, local_path: str, original_key: str) -> str:
@@ -302,6 +408,7 @@ def main():
     print(f"[Processor] Watching prefix: {IN_PREFIX}")
     print(f"[Processor] Output prefix: {OUT_PREFIX}")
     print(f"[Processor] Poll interval: {POLL_SECONDS}s")
+    print(f"[Processor] Progress every: {PROGRESS_EVERY} rows")
 
     while True:
         try:
@@ -322,7 +429,8 @@ def main():
                     # Use a unique local filename (avoid overwriting)
                     ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
                     base = os.path.basename(key).replace(".csv", "")
-                    local_out = os.path.join(TMP_DIR, f"{base}_mapped_{ts}.csv")
+                    local_out = os.path.join(
+                        TMP_DIR, f"{base}_mapped_{ts}.csv")
 
                     # Generate mapped CSV locally
                     write_mapped_csv(local_out, input_stream, fx)
@@ -335,20 +443,17 @@ def main():
                     state["ingest_results"][key] = resp
 
                     # 2) Only after ingest success:
-                    #    - upload to processed/
-                    #    - delete from incoming/
-                    #    - mark as processed in local state
                     out_key = upload_processed_csv(s3, local_out, key)
                     delete_original(s3, key)
 
                     state["processed_keys"].append(key)
                     save_state(state)
 
-                    print(f"[Processor] OK -> uploaded: {out_key} | deleted: {key}")
+                    print(
+                        f"[Processor] OK -> uploaded: {out_key} | deleted: {key}")
 
                 except Exception as e:
                     # Do NOT delete the original S3 object and do NOT mark it as processed.
-                    # This allows retry on the next cycle.
                     print(f"[Processor] FAILED for {key}: {e}")
                     continue
 

@@ -32,6 +32,12 @@ const REQUIRED_COLUMNS = [
   "estimated_cost_eur",
   "estimated_cost_usd",
   "fx_eur_usd",
+  "weather_source",
+  "weather_temperature_c",
+  "weather_wind_kmh",
+  "weather_precip_mm",
+  "weather_code",
+  "weather_time_utc",
   "risk_score",
   "location_corrected",
   "tags",
@@ -141,6 +147,13 @@ export function parseMappedCsv(text) {
       estimated_cost_usd: toNumber(cols[idx.estimated_cost_usd]),
       fx_eur_usd: toNumber(cols[idx.fx_eur_usd]),
 
+      weather_source: cols[idx.weather_source],
+      weather_temperature_c: toNumber(cols[idx.weather_temperature_c]),
+      weather_wind_kmh: toNumber(cols[idx.weather_wind_kmh]),
+      weather_precip_mm: toNumber(cols[idx.weather_precip_mm]),
+      weather_code: toNumber(cols[idx.weather_code]),
+      weather_time_utc: cols[idx.weather_time_utc],
+
       tags: cols[idx.tags],
       notes: cols[idx.notes],
     });
@@ -199,6 +212,24 @@ export function buildXml({ requestId, mapperVersion, rows }) {
       .up()
       .up();
 
+    // Weather block (external API enrichment)
+    incident
+      .ele("Weather", {
+        ...(attrIf(r.weather_source) !== undefined ? { Source: String(r.weather_source) } : {}),
+        ...(attrIf(r.weather_time_utc) !== undefined ? { TimeUTC: String(r.weather_time_utc) } : {}),
+        ...(attrIf(r.weather_code) !== undefined ? { Code: String(r.weather_code) } : {}),
+      })
+      .ele("TemperatureC")
+      .txt(r.weather_temperature_c ?? "")
+      .up()
+      .ele("WindKMH")
+      .txt(r.weather_wind_kmh ?? "")
+      .up()
+      .ele("PrecipitationMM")
+      .txt(r.weather_precip_mm ?? "")
+      .up()
+      .up();
+
     // Timeline block
     incident
       .ele("Timeline")
@@ -233,7 +264,7 @@ export function buildXml({ requestId, mapperVersion, rows }) {
       .up()
       .up();
 
-    // Risk / Financial Impact block 
+    // Risk / Financial Impact block
     incident
       .ele("Assessment")
       .ele("RiskScore")

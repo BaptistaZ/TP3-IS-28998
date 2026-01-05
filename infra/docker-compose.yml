@@ -64,7 +64,9 @@ services:
     container_name: processor
     env_file:
       - .env.docker
-    command: ["python", "processor.py"]
+    environment:
+      - PYTHONUNBUFFERED=1
+    command: ["python", "-u", "processor.py"]
     depends_on:
       xml-service:
         condition: service_started
