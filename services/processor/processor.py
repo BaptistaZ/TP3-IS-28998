@@ -6,12 +6,14 @@ import csv
 import io
 from typing import Dict, Any, List
 from xmlrpc.client import ServerProxy
-from weather_client import fetch_weather
 
 import boto3
 from botocore.client import Config
 import requests
 from dotenv import load_dotenv
+
+from weather_client import fetch_weather
+from state_store import with_locked_state  # <-- NOVO
 
 load_dotenv()
 
@@ -40,6 +42,14 @@ STATE_PATH = os.path.join(TMP_DIR, "processor_state.json")
 # Progress logs
 PROGRESS_EVERY = int(os.getenv("PROCESSOR_PROGRESS_EVERY", "2000"))
 
+# Estado inicial (para state_store)
+INIT_STATE = {
+    "processed_keys": [],
+    "ingest_results": {},
+    "pending_ingests": {},
+    "webhook_events": {},
+}
+
 
 # -----------------------------
 # XML Service integration
@@ -55,12 +65,8 @@ def send_to_xml_service(mapped_csv_path: str, source_key: str) -> Dict[str, Any]
 
     Returns the XML Service JSON response (sync response).
     """
-    ingest_url = os.getenv("XML_SERVICE_INGEST_URL",
-                           "http://localhost:7001/ingest")
-    webhook_url = os.getenv(
-        "PROCESSOR_WEBHOOK_URL",
-        "http://localhost:8000/webhook/xml-status"
-    )
+    ingest_url = os.getenv("XML_SERVICE_INGEST_URL", "http://localhost:7001/ingest")
+    webhook_url = os.getenv("PROCESSOR_WEBHOOK_URL", "http://localhost:8000/webhook/xml-status")
     mapper_version = os.getenv("MAPPER_VERSION", "1.0.0")
     timeout_s = int(os.getenv("XML_SERVICE_TIMEOUT_SECONDS", "20"))
     prefix = os.getenv("PROCESSOR_REQUEST_ID_PREFIX", "Processor")
@@ -71,18 +77,19 @@ def send_to_xml_service(mapped_csv_path: str, source_key: str) -> Dict[str, Any]
     request_id = f"{prefix}_{safe_key}_{ts}"
 
     with open(mapped_csv_path, "rb") as f:
-        files = {"mapped_csv": (os.path.basename(
-            mapped_csv_path), f, "text/csv")}
+        files = {"mapped_csv": (os.path.basename(mapped_csv_path), f, "text/csv")}
         data = {
             "request_id": request_id,
             "mapper_version": mapper_version,
             "webhook_url": webhook_url,
         }
 
-        r = requests.post(ingest_url, data=data,
-                          files=files, timeout=timeout_s)
+        r = requests.post(ingest_url, data=data, files=files, timeout=timeout_s)
         r.raise_for_status()
-        return r.json()
+        resp = r.json()
+        resp["_request_id"] = request_id
+        resp["_source_key"] = source_key
+        return resp
 
 
 # -----------------------------
@@ -94,8 +101,7 @@ def s3_client():
         endpoint_url=ENDPOINT,
         aws_access_key_id=ACCESS_KEY,
         aws_secret_access_key=SECRET_KEY,
-        config=Config(signature_version="s3v4", s3={
-                      "addressing_style": "path"}),
+        config=Config(signature_version="s3v4", s3={"addressing_style": "path"}),
         region_name=REGION,
     )
 
@@ -105,42 +111,15 @@ def ensure_tmp():
 
 
 # -----------------------------
-# State handling
-# -----------------------------
-def load_state() -> Dict[str, Any]:
-    """
-    State is used to avoid reprocessing the same S3 keys.
-    """
-    if not os.path.exists(STATE_PATH):
-        return {"processed_keys": [], "ingest_results": {}}
-
-    with open(STATE_PATH, "r", encoding="utf-8") as f:
-        state = json.load(f)
-
-    # Backward-compatible defaults
-    state.setdefault("processed_keys", [])
-    state.setdefault("ingest_results", {})
-    return state
-
-
-def save_state(state: Dict[str, Any]):
-    with open(STATE_PATH, "w", encoding="utf-8") as f:
-        json.dump(state, f, indent=2)
-
-
-# -----------------------------
 # External enrichment
 # -----------------------------
 def _to_float(value: Any) -> float:
-    # xmlrpc pode devolver coisas "estranhas" para o type-checker
     if isinstance(value, (int, float)):
         return float(value)
     if isinstance(value, bytes):
         return float(value.decode("utf-8").strip())
     if hasattr(value, "data") and isinstance(getattr(value, "data"), (bytes, bytearray)):
-        # xmlrpc.client.Binary -> tem .data (bytes)
         return float(value.data.decode("utf-8").strip())
-    # fallback: str()
     return float(str(value).strip())
 
 
@@ -157,13 +136,11 @@ def fetch_fx_eur_usd():
         client = ServerProxy(rpc_url, allow_none=True)
         rate = client.get_eur_usd_rate()
         rate_f = _to_float(rate)
-
         print(f"[Processor] FX via XML-RPC OK -> {rate_f}")
         return rate_f
 
     except Exception as e:
-        print(
-            f"[Processor] XML-RPC unavailable, fallback to REST FX API. Reason: {e}")
+        print(f"[Processor] XML-RPC unavailable, fallback to REST FX API. Reason: {e}")
 
         r = requests.get(FX_URL, timeout=8)
         r.raise_for_status()
@@ -188,9 +165,7 @@ def fetch_fx_eur_usd():
 def list_new_csv_objects(s3, processed_keys: List[str]) -> List[str]:
     resp = s3.list_objects_v2(Bucket=BUCKET, Prefix=IN_PREFIX)
     items = resp.get("Contents", [])
-    # Sort oldest -> newest
-    items.sort(key=lambda x: x["LastModified"])
-
+    items.sort(key=lambda x: x["LastModified"])  # oldest -> newest
     keys = [it["Key"] for it in items if it["Key"].endswith(".csv")]
     return [k for k in keys if k not in processed_keys]
 
@@ -205,61 +180,26 @@ def download_object_to_memory(s3, key: str) -> io.StringIO:
 # Mapping / transformation
 # -----------------------------
 def write_mapped_csv(local_path: str, input_stream: io.StringIO, fx_usd: float):
-    """
-    Stream read + stream write (row by row).
-    Inclui enrichment weather (controlado por WEATHER_ENABLED no weather_client.py).
-    Inclui também um "budget" de chamadas por ficheiro para evitar desastres.
-    """
-
-    MAX_WEATHER_CALLS_PER_FILE = int(
-        os.getenv("MAX_WEATHER_CALLS_PER_FILE", "300"))
+    MAX_WEATHER_CALLS_PER_FILE = int(os.getenv("MAX_WEATHER_CALLS_PER_FILE", "300"))
 
     reader = csv.DictReader(input_stream)
 
     fieldnames = [
-        "incident_id",
-        "source",
-        "incident_type",
-        "severity",
-        "status",
-        "city",
-        "country",
-        "continent",
-        "lat",
-        "lon",
-        "location_accuracy_m",
-        "reported_at",
-        "validated_at",
-        "resolved_at",
-        "last_update_utc",
-        "assigned_unit",
-        "resources_count",
-        "response_eta_min",
-        "response_time_min",
-        "estimated_cost_eur",
-        "estimated_cost_usd",
-        "risk_score",
-        "location_corrected",
-        "tags",
-        "notes",
-        "fx_eur_usd",
-        "weather_source",
-        "weather_temperature_c",
-        "weather_wind_kmh",
-        "weather_precip_mm",
-        "weather_code",
-        "weather_time_utc",
-        "mapper_version",
-        "processed_at_utc",
+        "incident_id", "source", "incident_type", "severity", "status",
+        "city", "country", "continent", "lat", "lon", "location_accuracy_m",
+        "reported_at", "validated_at", "resolved_at", "last_update_utc",
+        "assigned_unit", "resources_count", "response_eta_min", "response_time_min",
+        "estimated_cost_eur", "estimated_cost_usd", "risk_score", "location_corrected",
+        "tags", "notes", "fx_eur_usd",
+        "weather_source", "weather_temperature_c", "weather_wind_kmh", "weather_precip_mm",
+        "weather_code", "weather_time_utc",
+        "mapper_version", "processed_at_utc",
     ]
 
     processed_at = datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
     mapper_version = os.getenv("MAPPER_VERSION", "1.0.0")
 
-    # Cache local adicional (por ficheiro) - ALINHADA com weather_client (2 casas decimais)
     weather_cache: Dict[tuple, dict] = {}
-
-    # Defaults para não rebentar schema a jusante
     empty_weather = {
         "weather_source": "",
         "weather_temperature_c": "",
@@ -269,11 +209,10 @@ def write_mapped_csv(local_path: str, input_stream: io.StringIO, fx_usd: float):
         "weather_time_utc": "",
     }
 
-    # Stats (para perceber se está a funcionar e não "rebenta" o pipeline)
-    weather_calls = 0        # chamadas reais ao serviço (após budget)
-    weather_hits = 0         # hits de cache (por ficheiro)
-    weather_misses = 0       # chamadas que devolveram dados e foram guardadas em cache
-    weather_skipped = 0      # não chamou porque esgotou budget
+    weather_calls = 0
+    weather_hits = 0
+    weather_misses = 0
+    weather_skipped = 0
 
     t0 = time.time()
     rows_written = 0
@@ -285,19 +224,15 @@ def write_mapped_csv(local_path: str, input_stream: io.StringIO, fx_usd: float):
         for row in reader:
             rows_written += 1
 
-            # progress log
             if PROGRESS_EVERY > 0 and (rows_written % PROGRESS_EVERY == 0):
                 elapsed = time.time() - t0
                 rps = rows_written / elapsed if elapsed > 0 else 0.0
-                print(
-                    f"[Processor] mapping... rows={rows_written} elapsed={elapsed:.1f}s (~{rps:.1f} rows/s)")
+                print(f"[Processor] mapping... rows={rows_written} elapsed={elapsed:.1f}s (~{rps:.1f} rows/s)")
 
-            # custo
             cost_eur_str = (row.get("estimated_cost_eur") or "").strip()
             cost_eur = float(cost_eur_str) if cost_eur_str else 0.0
             cost_usd = round(cost_eur * fx_usd, 6)
 
-            # --- Weather enrichment (external API) ---
             weather = None
             try:
                 lat_raw = (row.get("lat") or "").strip()
@@ -307,7 +242,6 @@ def write_mapped_csv(local_path: str, input_stream: io.StringIO, fx_usd: float):
                     lat = float(lat_raw)
                     lon = float(lon_raw)
 
-                    # Normaliza para 2 casas decimais (deve bater com o weather_client)
                     ROUND_DECIMALS = int(os.getenv("WEATHER_ROUND_DECIMALS", "1"))
                     lat2 = round(lat, ROUND_DECIMALS)
                     lon2 = round(lon, ROUND_DECIMALS)
@@ -317,18 +251,14 @@ def write_mapped_csv(local_path: str, input_stream: io.StringIO, fx_usd: float):
                         weather = weather_cache[wkey]
                         weather_hits += 1
                     else:
-                        # budget de chamadas por ficheiro
                         if weather_calls < MAX_WEATHER_CALLS_PER_FILE:
                             weather_calls += 1
                             weather = fetch_weather(lat2, lon2)
-
-                            # fetch_weather pode devolver None (disabled/fail)
                             if weather:
                                 weather_cache[wkey] = weather
                                 weather_misses += 1
                         else:
                             weather_skipped += 1
-
             except Exception:
                 weather = None
 
@@ -374,14 +304,11 @@ def write_mapped_csv(local_path: str, input_stream: io.StringIO, fx_usd: float):
 
     elapsed = time.time() - t0
     rps = rows_written / elapsed if elapsed > 0 else 0.0
-
-    print(
-        f"[Processor] mapping done -> rows={rows_written} elapsed={elapsed:.1f}s (~{rps:.1f} rows/s)")
+    print(f"[Processor] mapping done -> rows={rows_written} elapsed={elapsed:.1f}s (~{rps:.1f} rows/s)")
     print(
         "[Processor] weather stats -> "
-        f"budget={MAX_WEATHER_CALLS_PER_FILE} "
-        f"calls={weather_calls} hits={weather_hits} misses={weather_misses} skipped={weather_skipped} "
-        f"cache_entries={len(weather_cache)}"
+        f"budget={MAX_WEATHER_CALLS_PER_FILE} calls={weather_calls} hits={weather_hits} "
+        f"misses={weather_misses} skipped={weather_skipped} cache_entries={len(weather_cache)}"
     )
 
 
@@ -397,12 +324,94 @@ def delete_original(s3, key: str):
 
 
 # -----------------------------
+# Webhook gating (finalize)
+# -----------------------------
+def finalize_ready_ingests(s3):
+    """
+    Finaliza pendentes quando existir webhook_event.
+    Tudo dentro de 1 lock (sem lost updates).
+    """
+
+    def _tx(state: Dict[str, Any]):
+        pending: Dict[str, Any] = state.get("pending_ingests", {}) or {}
+        events: Dict[str, Any] = state.get("webhook_events", {}) or {}
+
+        if not pending:
+            return
+
+        done_request_ids: List[str] = []
+
+        # Iterar snapshot (para poderes remover do pending em segurança)
+        for request_id, pinfo in list(pending.items()):
+            ev = events.get(request_id)
+            if not ev:
+                continue
+
+            status = (ev.get("status") or "").upper()
+            source_key = pinfo["source_key"]
+            mapped_local_path = pinfo["mapped_local_path"]
+
+            if status == "OK":
+                out_key = upload_processed_csv(s3, mapped_local_path, source_key)
+                delete_original(s3, source_key)
+
+                if source_key not in state["processed_keys"]:
+                    state["processed_keys"].append(source_key)
+
+                state["ingest_results"][source_key] = {
+                    "request_id": request_id,
+                    "status": "OK",
+                    "db_document_id": ev.get("db_document_id"),
+                    "xml_service_response": pinfo.get("xml_service_response"),
+                    "webhook_event": ev,
+                }
+
+                print(
+                    f"[Processor] FINALIZED OK -> uploaded={out_key} deleted={source_key} request_id={request_id}"
+                )
+                done_request_ids.append(request_id)
+
+            else:
+                state["ingest_results"][source_key] = {
+                    "request_id": request_id,
+                    "status": status,
+                    "error": ev.get("error"),
+                    "xml_service_response": pinfo.get("xml_service_response"),
+                    "webhook_event": ev,
+                }
+                print(
+                    f"[Processor] FINALIZED ERROR -> status={status} source={source_key} request_id={request_id} error={ev.get('error')}"
+                )
+                done_request_ids.append(request_id)
+
+        # limpeza
+        for rid in done_request_ids:
+            pending.pop(rid, None)
+            events.pop(rid, None)
+
+        state["pending_ingests"] = pending
+        state["webhook_events"] = events
+
+    with_locked_state(STATE_PATH, INIT_STATE, _tx)
+
+
+def register_pending_ingest(request_id: str, entry: Dict[str, Any]):
+    """
+    Regista pending dentro de lock para não atropelar updates do webhook.
+    """
+    def _tx(state: Dict[str, Any]):
+        state.setdefault("pending_ingests", {})
+        state["pending_ingests"][request_id] = entry
+
+    with_locked_state(STATE_PATH, INIT_STATE, _tx)
+
+
+# -----------------------------
 # Main loop
 # -----------------------------
 def main():
     ensure_tmp()
     s3 = s3_client()
-    state = load_state()
 
     print(f"[Processor] Bucket: {BUCKET}")
     print(f"[Processor] Watching prefix: {IN_PREFIX}")
@@ -412,8 +421,21 @@ def main():
 
     while True:
         try:
+            # 0) Finalize pendentes (gate real)
+            finalize_ready_ingests(s3)
+
+            # 1) Ler state para ver se ainda há pendentes
+            state = with_locked_state(STATE_PATH, INIT_STATE, lambda s: None)
+
+            if state.get("pending_ingests"):
+                print(f"[Processor] {len(state['pending_ingests'])} pending ingests -> waiting webhook (not taking new files)")
+                time.sleep(POLL_SECONDS)
+                continue
+
+            # 2) Normal processing
             fx = fetch_fx_eur_usd()
-            new_keys = list_new_csv_objects(s3, state["processed_keys"])
+            processed_keys = state.get("processed_keys", [])
+            new_keys = list_new_csv_objects(s3, processed_keys)
 
             if not new_keys:
                 print("[Processor] No new CSVs found.")
@@ -426,34 +448,29 @@ def main():
                 try:
                     input_stream = download_object_to_memory(s3, key)
 
-                    # Use a unique local filename (avoid overwriting)
                     ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
                     base = os.path.basename(key).replace(".csv", "")
-                    local_out = os.path.join(
-                        TMP_DIR, f"{base}_mapped_{ts}.csv")
+                    local_out = os.path.join(TMP_DIR, f"{base}_mapped_{ts}.csv")
 
-                    # Generate mapped CSV locally
                     write_mapped_csv(local_out, input_stream, fx)
 
-                    # 1) Send to XML Service (automatic ingest)
                     resp = send_to_xml_service(local_out, key)
-                    print(f"[Processor] XML ingest OK -> {resp}")
+                    request_id = resp.get("_request_id")
+                    print(f"[Processor] XML ingest ACK -> request_id={request_id} resp={resp}")
 
-                    # Save ingest response for traceability/reporting
-                    state["ingest_results"][key] = resp
+                    if not request_id:
+                        raise RuntimeError("XML Service response missing _request_id (cannot gate via webhook)")
 
-                    # 2) Only after ingest success:
-                    out_key = upload_processed_csv(s3, local_out, key)
-                    delete_original(s3, key)
+                    register_pending_ingest(request_id, {
+                        "source_key": key,
+                        "mapped_local_path": local_out,
+                        "created_at_utc": datetime.utcnow().replace(microsecond=0).isoformat() + "Z",
+                        "xml_service_response": resp,
+                    })
 
-                    state["processed_keys"].append(key)
-                    save_state(state)
-
-                    print(
-                        f"[Processor] OK -> uploaded: {out_key} | deleted: {key}")
+                    print(f"[Processor] PENDING -> waiting webhook for request_id={request_id} source={key}")
 
                 except Exception as e:
-                    # Do NOT delete the original S3 object and do NOT mark it as processed.
                     print(f"[Processor] FAILED for {key}: {e}")
                     continue
 

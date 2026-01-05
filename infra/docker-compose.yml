@@ -87,6 +87,8 @@ services:
     command: ["python", "webhook_server.py"]
     ports:
       - "8000:8000"
+    volumes:
+      - processor_tmp:/app/tmp
 
   crawler:
     build:
