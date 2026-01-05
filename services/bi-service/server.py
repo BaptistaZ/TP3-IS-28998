@@ -13,6 +13,12 @@ from starlette.applications import Starlette
 from starlette.responses import JSONResponse
 from starlette.routing import Route, Mount
 
+from xml_service_client import (
+    fetch_incidents,
+    fetch_agg_by_type,
+    fetch_agg_by_severity,
+)
+
 import bi_pb2
 import bi_pb2_grpc
 
@@ -23,7 +29,7 @@ load_dotenv()
 # -----------------------------
 BI_PORT = int(os.getenv("PORT") or os.getenv("BI_SERVICE_PORT", "4000"))
 
-# gRPC BI Service endpoint
+# gRPC BI Service endpoint (mantemos para docs)
 GRPC_HOST = os.getenv("GRPC_SERVICE_HOST", "grpc-service")
 GRPC_PORT = int(os.getenv("GRPC_SERVICE_PORT", "50051"))
 
@@ -38,8 +44,33 @@ def grpc_stub() -> bi_pb2_grpc.BIServiceStub:
     return bi_pb2_grpc.BIServiceStub(channel)
 
 
+# -----------------------------
+# Safe converters
+# -----------------------------
+def _to_int(v: Any, default: int = 0) -> int:
+    try:
+        if v is None:
+            return default
+        if isinstance(v, str) and v.strip() == "":
+            return default
+        return int(v)
+    except Exception:
+        return default
+
+
+def _to_float(v: Any) -> Optional[float]:
+    try:
+        if v is None:
+            return None
+        if isinstance(v, str) and v.strip() == "":
+            return None
+        return float(v)
+    except Exception:
+        return None
+
+
 def _safe_float(v: Any) -> Optional[float]:
-    """Convert protobuf numeric (or None) to float safely."""
+    """Backwards compatibility for gRPC mapping (protobuf numeric)."""
     try:
         return float(v)
     except Exception:
@@ -58,7 +89,7 @@ def map_doc(d: Any) -> Dict[str, Any]:
 
 
 def map_incident(i: Any) -> Dict[str, Any]:
-    # Map gRPC Incident -> GraphQL Incident fields
+    # (mantido caso uses gRPC noutros resolvers futuramente)
     return {
         "docId": int(i.doc_id),
         "incidentId": str(i.incident_id),
@@ -85,23 +116,6 @@ def map_incident(i: Any) -> Dict[str, Any]:
     }
 
 
-def map_agg_by_type(r: Any) -> Dict[str, Any]:
-    return {
-        "incidentType": str(r.incident_type),
-        "totalIncidents": int(r.total_incidents),
-        "avgRiskScore": _safe_float(r.avg_risk_score),
-        "totalEstimatedCostEur": _safe_float(r.total_estimated_cost_eur),
-    }
-
-
-def map_agg_by_severity(r: Any) -> Dict[str, Any]:
-    return {
-        "severity": str(r.severity),
-        "totalIncidents": int(r.total_incidents),
-        "avgRiskScore": _safe_float(r.avg_risk_score),
-    }
-
-
 # -----------------------------
 # GraphQL schema + resolvers (Ariadne)
 # -----------------------------
@@ -118,7 +132,7 @@ def resolve_health(*_) -> str:
 
 @query.field("docs")
 def resolve_docs(*_, limit: int = 10) -> List[Dict[str, Any]]:
-    """List stored XML docs (metadata only)."""
+    """List stored XML docs (metadata only) via gRPC (mantém evidência gRPC)."""
     try:
         stub = grpc_stub()
         resp = stub.ListDocs(bi_pb2.ListDocsRequest(limit=limit))
@@ -136,43 +150,87 @@ def resolve_incidents(
     country: Optional[str] = None,
     limit: int = 50,
 ) -> List[Dict[str, Any]]:
-    """Query incidents with optional filters."""
+    """Query incidents via XML Service REST (Req 14)."""
     try:
-        stub = grpc_stub()
-        resp = stub.QueryIncidents(
-            bi_pb2.QueryIncidentsRequest(
-                type=type or "",
-                severity=severity or "",
-                status=status or "",
-                country=country or "",
-                limit=limit,
-            )
+        rows = fetch_incidents(
+            type=type,
+            severity=severity,
+            status=status,
+            country=country,
+            limit=limit,
         )
-        return [map_incident(i) for i in resp.incidents]
-    except grpc.RpcError as e:
-        raise RuntimeError(f"gRPC QueryIncidents failed: {e.code().name} - {e.details()}")
+
+        out: List[Dict[str, Any]] = []
+        for r in rows:
+            out.append(
+                {
+                    "docId": _to_int(r.get("doc_id"), default=0),
+                    "incidentId": r.get("incident_id"),
+                    "source": r.get("source"),
+                    "incidentType": r.get("incident_type"),
+                    "severity": r.get("severity"),
+                    "status": r.get("status"),
+                    "city": r.get("city"),
+                    "country": r.get("country"),
+                    "continent": r.get("continent"),
+                    "lat": _to_float(r.get("lat")),
+                    "lon": _to_float(r.get("lon")),
+                    "accuracyM": _to_float(r.get("accuracy_m")),
+                    "reportedAt": r.get("reported_at"),
+                    "validatedAt": r.get("validated_at"),
+                    "resolvedAt": r.get("resolved_at"),
+                    "lastUpdateUtc": r.get("last_update_utc"),
+                    "assignedUnit": r.get("assigned_unit"),
+                    "resourcesCount": _to_float(r.get("resources_count")),
+                    "etaMin": _to_float(r.get("eta_min")),
+                    "responseTimeMin": _to_float(r.get("response_time_min")),
+                    "estimatedCostEur": _to_float(r.get("estimated_cost_eur")),
+                    "riskScore": _to_float(r.get("risk_score")),
+                }
+            )
+        return out
+
+    except Exception as e:
+        raise RuntimeError(f"XML Service /query/incidents failed: {e}")
 
 
 @query.field("aggByType")
 def resolve_agg_by_type(*_) -> List[Dict[str, Any]]:
-    """Aggregation grouped by incident type."""
+    """Aggregation grouped by incident type via XML Service REST (Req 14)."""
     try:
-        stub = grpc_stub()
-        resp = stub.AggByType(bi_pb2.AggByTypeRequest())
-        return [map_agg_by_type(r) for r in resp.rows]
-    except grpc.RpcError as e:
-        raise RuntimeError(f"gRPC AggByType failed: {e.code().name} - {e.details()}")
+        rows = fetch_agg_by_type()
+        out: List[Dict[str, Any]] = []
+        for r in rows:
+            out.append(
+                {
+                    "incidentType": r.get("incident_type"),
+                    "totalIncidents": _to_int(r.get("total_incidents"), default=0),
+                    "avgRiskScore": _to_float(r.get("avg_risk_score")),
+                    "totalEstimatedCostEur": _to_float(r.get("total_estimated_cost_eur")),
+                }
+            )
+        return out
+    except Exception as e:
+        raise RuntimeError(f"XML Service /query/agg/type failed: {e}")
 
 
 @query.field("aggBySeverity")
 def resolve_agg_by_severity(*_) -> List[Dict[str, Any]]:
-    """Aggregation grouped by severity."""
+    """Aggregation grouped by severity via XML Service REST (Req 14)."""
     try:
-        stub = grpc_stub()
-        resp = stub.AggBySeverity(bi_pb2.AggBySeverityRequest())
-        return [map_agg_by_severity(r) for r in resp.rows]
-    except grpc.RpcError as e:
-        raise RuntimeError(f"gRPC AggBySeverity failed: {e.code().name} - {e.details()}")
+        rows = fetch_agg_by_severity()
+        out: List[Dict[str, Any]] = []
+        for r in rows:
+            out.append(
+                {
+                    "severity": r.get("severity"),
+                    "totalIncidents": _to_int(r.get("total_incidents"), default=0),
+                    "avgRiskScore": _to_float(r.get("avg_risk_score")),
+                }
+            )
+        return out
+    except Exception as e:
+        raise RuntimeError(f"XML Service /query/agg/severity failed: {e}")
 
 
 schema = make_executable_schema(type_defs, query)
