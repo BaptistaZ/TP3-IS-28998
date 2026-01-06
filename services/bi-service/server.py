@@ -12,6 +12,7 @@ import uvicorn
 from starlette.applications import Starlette
 from starlette.responses import JSONResponse
 from starlette.routing import Route, Mount
+from starlette.responses import RedirectResponse, PlainTextResponse
 
 from xml_service_client import (
     fetch_incidents,
@@ -237,12 +238,15 @@ schema = make_executable_schema(type_defs, query)
 app = GraphQL(schema, debug=True)
 
 
-def http_health(_request):
-    return JSONResponse({"ok": True, "service": "bi-service"})
+def http_root(request):
+    return RedirectResponse(url="/graphql")
 
+def http_health(request):
+    return PlainTextResponse("ok")
 
 starlette_app = Starlette(
     routes=[
+        Route("/", http_root, methods=["GET"]),
         Route("/health", http_health, methods=["GET"]),
         Mount("/graphql", app),
     ]

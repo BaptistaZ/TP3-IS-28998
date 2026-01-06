@@ -106,75 +106,95 @@ app.post("/ingest", upload.single("mapped_csv"), async (req, res) => {
   const mapperVersion = req.body?.mapper_version;
   const webhookUrl = req.body?.webhook_url;
 
-  try {
-    IngestSchema.parse({
-      request_id: requestId,
-      mapper_version: mapperVersion,
-      webhook_url: webhookUrl,
-    });
+  // helper: envia webhook sem rebentar o fluxo
+  const safeWebhookPost = async (payload) => {
+    if (!webhookUrl) return;
+    try {
+      await axios.post(webhookUrl, payload);
+    } catch (err) {
+      console.warn("[Webhook] failed:", err?.message || err);
+    }
+  };
 
-    if (!req.file) {
-      return res.status(400).json({
-        request_id: requestId || "unknown",
-        status: "VALIDATION_ERROR",
-        error:
-          "Missing mapped_csv file (multipart field name must be 'mapped_csv')",
+  // helper: resposta + webhook com status normalizado
+  const fail = async (httpStatus, status, errorMsg, docId = null) => {
+    const payload = {
+      request_id: requestId || "unknown",
+      status,
+      db_document_id: docId,
+      error: errorMsg,
+    };
+    await safeWebhookPost(payload);
+    return res.status(httpStatus).json(payload);
+  };
+
+  try {
+    // 1) Validação dos campos obrigatórios
+    try {
+      IngestSchema.parse({
+        request_id: requestId,
+        mapper_version: mapperVersion,
+        webhook_url: webhookUrl,
       });
+    } catch (e) {
+      const msg = e?.message || "Invalid request fields";
+      return await fail(400, "ERRO_VALIDACAO", msg);
     }
 
-    const csvText = req.file.buffer.toString("utf-8");
-    const rows = parseMappedCsv(csvText);
+    // 2) Ficheiro obrigatório
+    if (!req.file) {
+      return await fail(
+        400,
+        "ERRO_VALIDACAO",
+        "Missing mapped_csv file (multipart field name must be 'mapped_csv')"
+      );
+    }
 
-    const xml = buildXml({ requestId, mapperVersion, rows });
+    // 3) Parsing + build XML (continua a ser validação/transformação)
+    let rows;
+    let xml;
+    try {
+      const csvText = req.file.buffer.toString("utf-8");
+      rows = parseMappedCsv(csvText);
+      xml = buildXml({ requestId, mapperVersion, rows });
+    } catch (e) {
+      const msg = e?.message || "Invalid CSV/XML build error";
+      return await fail(400, "ERRO_VALIDACAO", msg);
+    }
 
-    // 1️⃣ Persist XML in DB (source of truth)
-    const docId = await insertXmlDocument({
-      xml,
-      mapperVersion,
-      requestId,
-    });
+    // 4) Persistência (qualquer falha aqui é ERRO_PERSISTENCIA)
+    let docId;
+    try {
+      docId = await insertXmlDocument({ xml, mapperVersion, requestId });
+    } catch (e) {
+      const msg = e?.message || "DB persistence error";
+      return await fail(500, "ERRO_PERSISTENCIA", msg);
+    }
 
-    // 2️⃣ Save XML as file (debug / inspection)
-    saveXmlToFile({
-      xml,
-      requestId,
-      docId,
-    });
+    // 5) Guardar ficheiro (debug) — se falhar, não deve invalidar o fluxo
+    try {
+      saveXmlToFile({ xml, requestId, docId });
+    } catch (e) {
+      console.warn("[XML Service] saveXmlToFile failed (ignored):", e?.message || e);
+    }
 
+    // 6) Responder ao processor
     res.status(200).json({
       request_id: requestId,
       status: "OK",
       db_document_id: docId,
     });
 
-    // 3️⃣ Webhook callback
-    axios
-      .post(webhookUrl, {
-        request_id: requestId,
-        status: "OK",
-        db_document_id: docId,
-      })
-      .catch((err) => {
-        console.warn("[Webhook] failed:", err?.message || err);
-      });
-  } catch (e) {
-    const msg = e?.message || "Error";
-
-    if (webhookUrl) {
-      axios
-        .post(webhookUrl, {
-          request_id: requestId || "unknown",
-          status: "VALIDATION_ERROR",
-          error: msg,
-        })
-        .catch(() => {});
-    }
-
-    return res.status(400).json({
-      request_id: requestId || "unknown",
-      status: "VALIDATION_ERROR",
-      error: msg,
+    // 7) Webhook callback (assíncrono)
+    await safeWebhookPost({
+      request_id: requestId,
+      status: "OK",
+      db_document_id: docId,
     });
+  } catch (e) {
+    // fallback: algo inesperado
+    const msg = e?.message || "Unhandled error";
+    return await fail(500, "ERRO_PERSISTENCIA", msg);
   }
 });
 

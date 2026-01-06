@@ -117,7 +117,7 @@ export async function queryIncidents({ type, severity, status, country, limit = 
         eta_min_txt            text PATH 'Response/EtaMinutes/text()',
         response_time_min_txt  text PATH 'Response/ResponseTimeMinutes/text()',
 
-        estimated_cost_eur_txt text PATH 'Assessment/EstimatedCostEUR/text()',
+        estimated_cost_eur_txt text PATH 'FinancialImpact/EstimatedCost[@currency="EUR"]/text()',
         risk_score_txt         text PATH 'Assessment/RiskScore/text()'
     ) x ON true
     ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
@@ -148,7 +148,7 @@ export async function aggByType() {
       COLUMNS
         incident_type           text PATH '@Type',
         risk_score_txt          text PATH 'Assessment/RiskScore/text()',
-        estimated_cost_eur_txt  text PATH 'Assessment/EstimatedCostEUR/text()'
+        estimated_cost_eur_txt  text PATH 'FinancialImpact/EstimatedCost[@currency="EUR"]/text()'
     ) x ON true
     WHERE NULLIF(x.incident_type, '') IS NOT NULL
     GROUP BY x.incident_type
