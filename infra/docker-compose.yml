@@ -49,8 +49,8 @@ services:
 
   rpc-service:
     build:
-      context: ..
-      dockerfile: services/rpc-service/Dockerfile
+      context: ../services/rpc-service-java
+      dockerfile: Dockerfile
     container_name: rpc-service
     env_file:
       - .env.docker

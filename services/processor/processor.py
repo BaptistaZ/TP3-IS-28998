@@ -134,7 +134,7 @@ def fetch_fx_eur_usd():
 
     try:
         client = ServerProxy(rpc_url, allow_none=True)
-        rate = client.get_eur_usd_rate()
+        rate = client.default.get_eur_usd_rate()
         rate_f = _to_float(rate)
         print(f"[Processor] FX via XML-RPC OK -> {rate_f}")
         return rate_f
