@@ -65,8 +65,10 @@ def send_to_xml_service(mapped_csv_path: str, source_key: str) -> Dict[str, Any]
 
     Returns the XML Service JSON response (sync response).
     """
-    ingest_url = os.getenv("XML_SERVICE_INGEST_URL", "http://localhost:7001/ingest")
-    webhook_url = os.getenv("PROCESSOR_WEBHOOK_URL", "http://localhost:8000/webhook/xml-status")
+    ingest_url = os.getenv("XML_SERVICE_INGEST_URL",
+                           "http://localhost:7001/ingest")
+    webhook_url = os.getenv("PROCESSOR_WEBHOOK_URL",
+                            "http://localhost:8000/webhook/xml-status")
     mapper_version = os.getenv("MAPPER_VERSION", "1.0.0")
     timeout_s = int(os.getenv("XML_SERVICE_TIMEOUT_SECONDS", "20"))
     prefix = os.getenv("PROCESSOR_REQUEST_ID_PREFIX", "Processor")
@@ -77,14 +79,16 @@ def send_to_xml_service(mapped_csv_path: str, source_key: str) -> Dict[str, Any]
     request_id = f"{prefix}_{safe_key}_{ts}"
 
     with open(mapped_csv_path, "rb") as f:
-        files = {"mapped_csv": (os.path.basename(mapped_csv_path), f, "text/csv")}
+        files = {"mapped_csv": (os.path.basename(
+            mapped_csv_path), f, "text/csv")}
         data = {
             "request_id": request_id,
             "mapper_version": mapper_version,
             "webhook_url": webhook_url,
         }
 
-        r = requests.post(ingest_url, data=data, files=files, timeout=timeout_s)
+        r = requests.post(ingest_url, data=data,
+                          files=files, timeout=timeout_s)
         r.raise_for_status()
         resp = r.json()
         resp["_request_id"] = request_id
@@ -101,7 +105,8 @@ def s3_client():
         endpoint_url=ENDPOINT,
         aws_access_key_id=ACCESS_KEY,
         aws_secret_access_key=SECRET_KEY,
-        config=Config(signature_version="s3v4", s3={"addressing_style": "path"}),
+        config=Config(signature_version="s3v4", s3={
+                      "addressing_style": "path"}),
         region_name=REGION,
     )
 
@@ -140,7 +145,8 @@ def fetch_fx_eur_usd():
         return rate_f
 
     except Exception as e:
-        print(f"[Processor] XML-RPC unavailable, fallback to REST FX API. Reason: {e}")
+        print(
+            f"[Processor] XML-RPC unavailable, fallback to REST FX API. Reason: {e}")
 
         r = requests.get(FX_URL, timeout=8)
         r.raise_for_status()
@@ -180,20 +186,21 @@ def download_object_to_memory(s3, key: str) -> io.StringIO:
 # Mapping / transformation
 # -----------------------------
 def write_mapped_csv(local_path: str, input_stream: io.StringIO, fx_usd: float):
-    MAX_WEATHER_CALLS_PER_FILE = int(os.getenv("MAX_WEATHER_CALLS_PER_FILE", "300"))
+    MAX_WEATHER_CALLS_PER_FILE = int(
+        os.getenv("MAX_WEATHER_CALLS_PER_FILE", "300"))
 
     reader = csv.DictReader(input_stream)
 
     fieldnames = [
-        "incident_id", "source", "incident_type", "severity", "status",
-        "city", "country", "continent", "lat", "lon", "location_accuracy_m",
-        "reported_at", "validated_at", "resolved_at", "last_update_utc",
-        "assigned_unit", "resources_count", "response_eta_min", "response_time_min",
-        "estimated_cost_eur", "estimated_cost_usd", "risk_score", "location_corrected",
-        "tags", "notes", "fx_eur_usd",
-        "weather_source", "weather_temperature_c", "weather_wind_kmh", "weather_precip_mm",
-        "weather_code", "weather_time_utc",
-        "mapper_version", "processed_at_utc",
+        "id_ocorrencia", "origem", "tipo_ocorrencia", "nivel_gravidade", "estado",
+        "cidade", "pais", "continente", "latitude", "longitude", "precisao_m",
+        "reportado_em", "validado_em", "resolvido_em", "ultima_atualizacao_utc",
+        "unidade_atribuida", "num_recursos", "eta_min", "tempo_resposta_min",
+        "custo_estimado_eur", "custo_estimado_usd", "score_risco", "local_corrigido",
+        "etiquetas", "observacoes", "fx_eur_usd",
+        "meteo_fonte", "meteo_temp_c", "meteo_vento_kmh", "meteo_precip_mm",
+        "meteo_codigo", "meteo_time_utc",
+        "versao_mapper", "processado_em_utc",
     ]
 
     processed_at = datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
@@ -227,7 +234,8 @@ def write_mapped_csv(local_path: str, input_stream: io.StringIO, fx_usd: float):
             if PROGRESS_EVERY > 0 and (rows_written % PROGRESS_EVERY == 0):
                 elapsed = time.time() - t0
                 rps = rows_written / elapsed if elapsed > 0 else 0.0
-                print(f"[Processor] mapping... rows={rows_written} elapsed={elapsed:.1f}s (~{rps:.1f} rows/s)")
+                print(
+                    f"[Processor] mapping... rows={rows_written} elapsed={elapsed:.1f}s (~{rps:.1f} rows/s)")
 
             cost_eur_str = (row.get("estimated_cost_eur") or "").strip()
             cost_eur = float(cost_eur_str) if cost_eur_str else 0.0
@@ -242,7 +250,8 @@ def write_mapped_csv(local_path: str, input_stream: io.StringIO, fx_usd: float):
                     lat = float(lat_raw)
                     lon = float(lon_raw)
 
-                    ROUND_DECIMALS = int(os.getenv("WEATHER_ROUND_DECIMALS", "1"))
+                    ROUND_DECIMALS = int(
+                        os.getenv("WEATHER_ROUND_DECIMALS", "1"))
                     lat2 = round(lat, ROUND_DECIMALS)
                     lon2 = round(lon, ROUND_DECIMALS)
                     wkey = (lat2, lon2)
@@ -266,45 +275,53 @@ def write_mapped_csv(local_path: str, input_stream: io.StringIO, fx_usd: float):
                 weather = empty_weather
 
             writer.writerow({
-                "incident_id": row.get("incident_id", ""),
-                "source": row.get("source", ""),
-                "incident_type": row.get("incident_type", ""),
-                "severity": row.get("severity", ""),
-                "status": row.get("status", ""),
-                "city": row.get("city", ""),
-                "country": row.get("country", ""),
-                "continent": row.get("continent", ""),
-                "lat": row.get("lat", ""),
-                "lon": row.get("lon", ""),
-                "location_accuracy_m": row.get("location_accuracy_m", ""),
-                "reported_at": row.get("reported_at", ""),
-                "validated_at": row.get("validated_at", ""),
-                "resolved_at": row.get("resolved_at", ""),
-                "last_update_utc": row.get("last_update_utc", ""),
-                "assigned_unit": row.get("assigned_unit", ""),
-                "resources_count": row.get("resources_count", ""),
-                "response_eta_min": row.get("response_eta_min", ""),
-                "response_time_min": row.get("response_time_min", ""),
-                "estimated_cost_eur": f"{cost_eur:.2f}",
-                "estimated_cost_usd": f"{cost_usd:.2f}",
-                "risk_score": row.get("risk_score", ""),
-                "location_corrected": row.get("location_corrected", ""),
-                "tags": row.get("tags", ""),
-                "notes": row.get("notes", ""),
+                "id_ocorrencia": row.get("incident_id", ""),
+                "origem": row.get("source", ""),
+                "tipo_ocorrencia": row.get("incident_type", ""),
+                "nivel_gravidade": row.get("severity", ""),
+                "estado": row.get("status", ""),
+
+                "cidade": row.get("city", ""),
+                "pais": row.get("country", ""),
+                "continente": row.get("continent", ""),
+                "latitude": row.get("lat", ""),
+                "longitude": row.get("lon", ""),
+                "precisao_m": row.get("location_accuracy_m", ""),
+
+                "reportado_em": row.get("reported_at", ""),
+                "validado_em": row.get("validated_at", ""),
+                "resolvido_em": row.get("resolved_at", ""),
+                "ultima_atualizacao_utc": row.get("last_update_utc", ""),
+
+                "unidade_atribuida": row.get("assigned_unit", ""),
+                "num_recursos": row.get("resources_count", ""),
+                "eta_min": row.get("response_eta_min", ""),
+                "tempo_resposta_min": row.get("response_time_min", ""),
+
+                "custo_estimado_eur": f"{cost_eur:.2f}",
+                "custo_estimado_usd": f"{cost_usd:.2f}",
+                "score_risco": row.get("risk_score", ""),
+                "local_corrigido": row.get("location_corrected", ""),
+
+                "etiquetas": row.get("tags", ""),
+                "observacoes": row.get("notes", ""),
                 "fx_eur_usd": fx_usd,
-                "weather_source": weather.get("weather_source", ""),
-                "weather_temperature_c": weather.get("weather_temperature_c", ""),
-                "weather_wind_kmh": weather.get("weather_wind_kmh", ""),
-                "weather_precip_mm": weather.get("weather_precip_mm", ""),
-                "weather_code": weather.get("weather_code", ""),
-                "weather_time_utc": weather.get("weather_time_utc", ""),
-                "mapper_version": mapper_version,
-                "processed_at_utc": processed_at,
+
+                "meteo_fonte": weather.get("weather_source", ""),
+                "meteo_temp_c": weather.get("weather_temperature_c", ""),
+                "meteo_vento_kmh": weather.get("weather_wind_kmh", ""),
+                "meteo_precip_mm": weather.get("weather_precip_mm", ""),
+                "meteo_codigo": weather.get("weather_code", ""),
+                "meteo_time_utc": weather.get("weather_time_utc", ""),
+
+                "versao_mapper": mapper_version,
+                "processado_em_utc": processed_at,
             })
 
     elapsed = time.time() - t0
     rps = rows_written / elapsed if elapsed > 0 else 0.0
-    print(f"[Processor] mapping done -> rows={rows_written} elapsed={elapsed:.1f}s (~{rps:.1f} rows/s)")
+    print(
+        f"[Processor] mapping done -> rows={rows_written} elapsed={elapsed:.1f}s (~{rps:.1f} rows/s)")
     print(
         "[Processor] weather stats -> "
         f"budget={MAX_WEATHER_CALLS_PER_FILE} calls={weather_calls} hits={weather_hits} "
@@ -352,7 +369,8 @@ def finalize_ready_ingests(s3):
             mapped_local_path = pinfo["mapped_local_path"]
 
             if status == "OK":
-                out_key = upload_processed_csv(s3, mapped_local_path, source_key)
+                out_key = upload_processed_csv(
+                    s3, mapped_local_path, source_key)
                 delete_original(s3, source_key)
 
                 if source_key not in state["processed_keys"]:
@@ -428,7 +446,8 @@ def main():
             state = with_locked_state(STATE_PATH, INIT_STATE, lambda s: None)
 
             if state.get("pending_ingests"):
-                print(f"[Processor] {len(state['pending_ingests'])} pending ingests -> waiting webhook (not taking new files)")
+                print(
+                    f"[Processor] {len(state['pending_ingests'])} pending ingests -> waiting webhook (not taking new files)")
                 time.sleep(POLL_SECONDS)
                 continue
 
@@ -450,16 +469,19 @@ def main():
 
                     ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
                     base = os.path.basename(key).replace(".csv", "")
-                    local_out = os.path.join(TMP_DIR, f"{base}_mapped_{ts}.csv")
+                    local_out = os.path.join(
+                        TMP_DIR, f"{base}_mapped_{ts}.csv")
 
                     write_mapped_csv(local_out, input_stream, fx)
 
                     resp = send_to_xml_service(local_out, key)
                     request_id = resp.get("_request_id")
-                    print(f"[Processor] XML ingest ACK -> request_id={request_id} resp={resp}")
+                    print(
+                        f"[Processor] XML ingest ACK -> request_id={request_id} resp={resp}")
 
                     if not request_id:
-                        raise RuntimeError("XML Service response missing _request_id (cannot gate via webhook)")
+                        raise RuntimeError(
+                            "XML Service response missing _request_id (cannot gate via webhook)")
 
                     register_pending_ingest(request_id, {
                         "source_key": key,
@@ -468,7 +490,8 @@ def main():
                         "xml_service_response": resp,
                     })
 
-                    print(f"[Processor] PENDING -> waiting webhook for request_id={request_id} source={key}")
+                    print(
+                        f"[Processor] PENDING -> waiting webhook for request_id={request_id} source={key}")
 
                 except Exception as e:
                     print(f"[Processor] FAILED for {key}: {e}")

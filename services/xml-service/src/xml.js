@@ -10,38 +10,38 @@ export const IngestSchema = z.object({
 
 // Required columns from the Processor output
 const REQUIRED_COLUMNS = [
-  "incident_id",
-  "source",
-  "incident_type",
-  "severity",
-  "status",
-  "lat",
-  "lon",
-  "city",
-  "country",
-  "continent",
-  "location_accuracy_m",
-  "reported_at",
-  "validated_at",
-  "resolved_at",
-  "last_update_utc",
-  "assigned_unit",
-  "resources_count",
-  "response_eta_min",
-  "response_time_min",
-  "estimated_cost_eur",
-  "estimated_cost_usd",
+  "id_ocorrencia",
+  "origem",
+  "tipo_ocorrencia",
+  "nivel_gravidade",
+  "estado",
+  "latitude",
+  "longitude",
+  "cidade",
+  "pais",
+  "continente",
+  "precisao_m",
+  "reportado_em",
+  "validado_em",
+  "resolvido_em",
+  "ultima_atualizacao_utc",
+  "unidade_atribuida",
+  "num_recursos",
+  "eta_min",
+  "tempo_resposta_min",
+  "custo_estimado_eur",
+  "custo_estimado_usd",
   "fx_eur_usd",
-  "weather_source",
-  "weather_temperature_c",
-  "weather_wind_kmh",
-  "weather_precip_mm",
-  "weather_code",
-  "weather_time_utc",
-  "risk_score",
-  "location_corrected",
-  "tags",
-  "notes",
+  "meteo_fonte",
+  "meteo_temp_c",
+  "meteo_vento_kmh",
+  "meteo_precip_mm",
+  "meteo_codigo",
+  "meteo_time_utc",
+  "score_risco",
+  "local_corrigido",
+  "etiquetas",
+  "observacoes",
 ];
 
 function parseCsvLine(line) {
@@ -116,46 +116,46 @@ export function parseMappedCsv(text) {
     if (cols.length < header.length) continue;
 
     rows.push({
-      incident_id: cols[idx.incident_id],
-      source: cols[idx.source],
-      incident_type: cols[idx.incident_type],
-      severity: cols[idx.severity],
-      status: cols[idx.status],
+      incident_id: cols[idx.id_ocorrencia],
+      source: cols[idx.origem],
+      incident_type: cols[idx.tipo_ocorrencia],
+      severity: cols[idx.nivel_gravidade],
+      status: cols[idx.estado],
 
-      lat: toNumber(cols[idx.lat]),
-      lon: toNumber(cols[idx.lon]),
+      lat: toNumber(cols[idx.latitude]),
+      lon: toNumber(cols[idx.longitude]),
 
-      city: cols[idx.city],
-      country: cols[idx.country],
-      continent: cols[idx.continent],
-      location_accuracy_m: toNumber(cols[idx.location_accuracy_m]),
+      city: cols[idx.cidade],
+      country: cols[idx.pais],
+      continent: cols[idx.continente],
+      location_accuracy_m: toNumber(cols[idx.precisao_m]),
 
-      reported_at: cols[idx.reported_at],
-      validated_at: cols[idx.validated_at],
-      resolved_at: cols[idx.resolved_at],
-      last_update_utc: cols[idx.last_update_utc],
+      reported_at: cols[idx.reportado_em],
+      validated_at: cols[idx.validado_em],
+      resolved_at: cols[idx.resolvido_em],
+      last_update_utc: cols[idx.ultima_atualizacao_utc],
 
-      assigned_unit: cols[idx.assigned_unit],
-      resources_count: toNumber(cols[idx.resources_count]),
-      response_eta_min: toNumber(cols[idx.response_eta_min]),
-      response_time_min: toNumber(cols[idx.response_time_min]),
+      assigned_unit: cols[idx.unidade_atribuida],
+      resources_count: toNumber(cols[idx.num_recursos]),
+      response_eta_min: toNumber(cols[idx.eta_min]),
+      response_time_min: toNumber(cols[idx.tempo_resposta_min]),
 
-      estimated_cost_eur: toNumber(cols[idx.estimated_cost_eur]),
-      risk_score: toNumber(cols[idx.risk_score]),
-      location_corrected: toBoolean(cols[idx.location_corrected]),
-
-      estimated_cost_usd: toNumber(cols[idx.estimated_cost_usd]),
+      estimated_cost_eur: toNumber(cols[idx.custo_estimado_eur]),
+      estimated_cost_usd: toNumber(cols[idx.custo_estimado_usd]),
       fx_eur_usd: toNumber(cols[idx.fx_eur_usd]),
 
-      weather_source: cols[idx.weather_source],
-      weather_temperature_c: toNumber(cols[idx.weather_temperature_c]),
-      weather_wind_kmh: toNumber(cols[idx.weather_wind_kmh]),
-      weather_precip_mm: toNumber(cols[idx.weather_precip_mm]),
-      weather_code: toNumber(cols[idx.weather_code]),
-      weather_time_utc: cols[idx.weather_time_utc],
+      weather_source: cols[idx.meteo_fonte],
+      weather_temperature_c: toNumber(cols[idx.meteo_temp_c]),
+      weather_wind_kmh: toNumber(cols[idx.meteo_vento_kmh]),
+      weather_precip_mm: toNumber(cols[idx.meteo_precip_mm]),
+      weather_code: toNumber(cols[idx.meteo_codigo]),
+      weather_time_utc: cols[idx.meteo_time_utc],
 
-      tags: cols[idx.tags],
-      notes: cols[idx.notes],
+      risk_score: toNumber(cols[idx.score_risco]),
+      location_corrected: toBoolean(cols[idx.local_corrigido]),
+
+      tags: cols[idx.etiquetas],
+      notes: cols[idx.observacoes],
     });
   }
 
@@ -215,9 +215,15 @@ export function buildXml({ requestId, mapperVersion, rows }) {
     // Weather block (external API enrichment)
     incident
       .ele("Weather", {
-        ...(attrIf(r.weather_source) !== undefined ? { Source: String(r.weather_source) } : {}),
-        ...(attrIf(r.weather_time_utc) !== undefined ? { TimeUTC: String(r.weather_time_utc) } : {}),
-        ...(attrIf(r.weather_code) !== undefined ? { Code: String(r.weather_code) } : {}),
+        ...(attrIf(r.weather_source) !== undefined
+          ? { Source: String(r.weather_source) }
+          : {}),
+        ...(attrIf(r.weather_time_utc) !== undefined
+          ? { TimeUTC: String(r.weather_time_utc) }
+          : {}),
+        ...(attrIf(r.weather_code) !== undefined
+          ? { Code: String(r.weather_code) }
+          : {}),
       })
       .ele("TemperatureC")
       .txt(r.weather_temperature_c ?? "")
