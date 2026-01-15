@@ -12,6 +12,7 @@ import bi_pb2_grpc
 
 load_dotenv()
 
+
 def _to_iso(value) -> str:
     """Convert DB datetime (or string) to ISO-8601 string."""
     if value is None:
@@ -41,7 +42,7 @@ def get_db_conn():
     user = os.getenv("DB_USER", "tp3_28998")
     password = os.getenv("DB_PASSWORD", "tp3pwd_28998")
 
-    print(f"[gRPC] DB config -> host={host} port={port} db={dbname} user={user}")
+    print(f"[gRPC] DB config -> host={host} port={port} db={dbname} user={user}", flush=True)
 
     return psycopg2.connect(
         host=host,
@@ -59,7 +60,7 @@ class BIService(bi_pb2_grpc.BIServiceServicer):
         self.table = os.getenv("DB_TABLE", "tp3_incidents_xml")
 
     def ListDocs(self, request, context):
-        print(f"[gRPC] ListDocs(limit={request.limit})")
+        print(f"[gRPC] ListDocs(limit={request.limit})", flush=True)
         limit = request.limit if request.limit > 0 else 10
 
         sql = f"""
@@ -95,7 +96,8 @@ class BIService(bi_pb2_grpc.BIServiceServicer):
         print(
             "[gRPC] QueryIncidents("
             f"type='{request.type}', severity='{request.severity}', status='{request.status}', "
-            f"country='{request.country}', limit={request.limit})"
+            f"country='{request.country}', limit={request.limit})",
+            flush=True,
         )
 
         inc_type = (request.type or "").strip()
@@ -187,7 +189,7 @@ class BIService(bi_pb2_grpc.BIServiceServicer):
                 eta_min_txt            text PATH 'Response/EtaMinutes/text()',
                 response_time_min_txt  text PATH 'Response/ResponseTimeMinutes/text()',
 
-                estimated_cost_eur_txt text PATH 'Assessment/EstimatedCostEUR/text()',
+                estimated_cost_eur_txt text PATH 'FinancialImpact/EstimatedCost[@currency="EUR"]/text()',
                 risk_score_txt         text PATH 'Assessment/RiskScore/text()'
             ) x ON true
             {where_sql}
@@ -225,7 +227,8 @@ class BIService(bi_pb2_grpc.BIServiceServicer):
                         resources_count=_safe_float(r["resources_count"]),
                         eta_min=_safe_float(r["eta_min"]),
                         response_time_min=_safe_float(r["response_time_min"]),
-                        estimated_cost_eur=_safe_float(r["estimated_cost_eur"]),
+                        estimated_cost_eur=_safe_float(
+                            r["estimated_cost_eur"]),
                         risk_score=_safe_float(r["risk_score"]),
                     )
                 )
@@ -238,7 +241,7 @@ class BIService(bi_pb2_grpc.BIServiceServicer):
             return bi_pb2.QueryIncidentsResponse()
 
     def AggByType(self, request, context):
-        print("[gRPC] AggByType()")
+        print("[gRPC] AggByType()", flush=True)
 
         sql = f"""
             SELECT
@@ -252,8 +255,8 @@ class BIService(bi_pb2_grpc.BIServiceServicer):
               PASSING d.xml_documento
               COLUMNS
                 incident_type           text PATH '@Type',
-                risk_score_txt          text PATH 'Assessment/RiskScore/text()',
-                estimated_cost_eur_txt  text PATH 'Assessment/EstimatedCostEUR/text()'
+                risk_score_txt         text PATH 'Assessment/RiskScore/text()',
+                estimated_cost_eur_txt text PATH 'FinancialImpact/EstimatedCost[@currency="EUR"]/text()'
             ) x ON true
             WHERE NULLIF(x.incident_type, '') IS NOT NULL
             GROUP BY x.incident_type
@@ -273,7 +276,8 @@ class BIService(bi_pb2_grpc.BIServiceServicer):
                         incident_type=str(r["incident_type"] or ""),
                         total_incidents=int(r["total_incidents"] or 0),
                         avg_risk_score=_safe_float(r["avg_risk_score"]),
-                        total_estimated_cost_eur=_safe_float(r["total_estimated_cost_eur"]),
+                        total_estimated_cost_eur=_safe_float(
+                            r["total_estimated_cost_eur"]),
                     )
                 )
 
@@ -285,7 +289,7 @@ class BIService(bi_pb2_grpc.BIServiceServicer):
             return bi_pb2.AggByTypeResponse()
 
     def AggBySeverity(self, request, context):
-        print("[gRPC] AggBySeverity()")
+        print("[gRPC] AggBySeverity()", flush=True)
 
         sql = f"""
             SELECT
@@ -338,7 +342,7 @@ def serve():
 
     server.add_insecure_port(addr)
 
-    print(f"[gRPC] BIService listening on {addr}")
+    print(f"[gRPC] BIService listening on {addr}", flush=True)
     server.start()
     server.wait_for_termination()
 

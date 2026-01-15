@@ -135,8 +135,10 @@ def resolve_health(*_) -> str:
 def resolve_docs(*_, limit: int = 10) -> List[Dict[str, Any]]:
     """List stored XML docs (metadata only) via gRPC (mantém evidência gRPC)."""
     try:
+        print(f"[BI -> gRPC] docs(limit={limit}) calling {GRPC_HOST}:{GRPC_PORT}", flush=True)
         stub = grpc_stub()
         resp = stub.ListDocs(bi_pb2.ListDocsRequest(limit=limit))
+        print(f"[BI -> gRPC] docs OK -> {len(resp.docs)} docs", flush=True)
         return [map_doc(d) for d in resp.docs]
     except grpc.RpcError as e:
         raise RuntimeError(f"gRPC ListDocs failed: {e.code().name} - {e.details()}")
