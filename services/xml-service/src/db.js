@@ -33,3 +33,24 @@ export async function insertXmlDocument({ xml, mapperVersion, requestId }) {
   const r = await p.query(q, [xml, mapperVersion, requestId]);
   return r.rows[0].id;
 }
+
+export async function isXmlWellFormed(xml) {
+  const p = getPool();
+
+  // 1) caminho preferido: função booleana
+  try {
+    const r = await p.query(
+      "SELECT xml_is_well_formed_document($1) AS ok",
+      [xml]
+    );
+    return r.rows?.[0]?.ok === true;
+  } catch (e) {
+    // 2) fallback: forçar parse (lança erro se inválido)
+    try {
+      await p.query("SELECT xmlparse(document $1::text) AS x", [xml]);
+      return true;
+    } catch (_e2) {
+      return false;
+    }
+  }
+}

@@ -6,6 +6,8 @@ console.log("[ENV CHECK]", {
   DB_NAME: process.env.DB_NAME,
   DB_USER: process.env.DB_USER,
   XML_SERVICE_PORT: process.env.XML_SERVICE_PORT,
+  DEBUG_VALIDATION: process.env.DEBUG_VALIDATION || "0",
+  SAVE_XML_FILES: process.env.SAVE_XML_FILES || "0",
 });
 
 import express from "express";
@@ -21,7 +23,7 @@ import {
   aggBySeverity,
 } from "./queries.js";
 
-import { insertXmlDocument } from "./db.js";
+import { insertXmlDocument, isXmlWellFormed } from "./db.js";
 import { IngestSchema, parseMappedCsv, buildXml } from "./xml.js";
 
 const app = express();
@@ -146,7 +148,7 @@ app.post("/ingest", upload.single("mapped_csv"), async (req, res) => {
       return await fail(
         400,
         "ERRO_VALIDACAO",
-        "Missing mapped_csv file (multipart field name must be 'mapped_csv')"
+        "Missing mapped_csv file (multipart field name must be 'mapped_csv')",
       );
     }
 
@@ -162,6 +164,31 @@ app.post("/ingest", upload.single("mapped_csv"), async (req, res) => {
       return await fail(400, "ERRO_VALIDACAO", msg);
     }
 
+    console.log(
+      `[XML Service] validating generated XML (request_id=${requestId}, mapper_version=${mapperVersion}, bytes=${Buffer.byteLength(xml, "utf8")})`,
+    );
+
+    // 3.4) Fault-injection controlado (apenas para testes)
+    if (
+      process.env.DEBUG_VALIDATION === "1" &&
+      req.query?.force_invalid_xml === "1"
+    ) {
+      console.warn(
+        "[XML Service] force_invalid_xml=1 -> corrupting XML for test",
+      );
+      xml = xml + "<"; // torna o XML mal-formado
+    }
+
+    // 3.5) Validação explícita do XML gerado (well-formed)
+    const okXml = await isXmlWellFormed(xml);
+    if (!okXml) {
+      return await fail(
+        400,
+        "ERRO_VALIDACAO",
+        "Generated XML is not well-formed",
+      );
+    }
+
     // 4) Persistência (qualquer falha aqui é ERRO_PERSISTENCIA)
     let docId;
     try {
@@ -171,11 +198,16 @@ app.post("/ingest", upload.single("mapped_csv"), async (req, res) => {
       return await fail(500, "ERRO_PERSISTENCIA", msg);
     }
 
-    // 5) Guardar ficheiro (debug) — se falhar, não deve invalidar o fluxo
-    try {
-      saveXmlToFile({ xml, requestId, docId });
-    } catch (e) {
-      console.warn("[XML Service] saveXmlToFile failed (ignored):", e?.message || e);
+    // 5) Guardar ficheiro (debug) — só se for explicitamente ativado
+    if (process.env.SAVE_XML_FILES === "1") {
+      try {
+        saveXmlToFile({ xml, requestId, docId });
+      } catch (e) {
+        console.warn(
+          "[XML Service] saveXmlToFile failed (ignored):",
+          e?.message || e,
+        );
+      }
     }
 
     // 6) Responder ao processor
