@@ -6,6 +6,8 @@ import csv
 import io
 from typing import Dict, Any, List
 from xmlrpc.client import ServerProxy
+from contextlib import contextmanager, closing
+from io import TextIOWrapper, BufferedReader
 
 import boto3
 from botocore.client import Config
@@ -176,16 +178,31 @@ def list_new_csv_objects(s3, processed_keys: List[str]) -> List[str]:
     return [k for k in keys if k not in processed_keys]
 
 
-def download_object_to_memory(s3, key: str) -> io.StringIO:
+@contextmanager
+def open_object_text_stream(s3, key: str, encoding: str = "utf-8"):
+    """
+    Abre um stream de texto para um objeto S3 sem carregar o ficheiro todo em memória.
+    Uso:
+        with open_object_text_stream(s3, key) as f:
+            reader = csv.DictReader(f)
+            ...
+    """
     obj = s3.get_object(Bucket=BUCKET, Key=key)
-    body = obj["Body"].read()
-    return io.StringIO(body.decode("utf-8"))
+    body = obj["Body"]  # botocore.response.StreamingBody (streaming)
+
+    # Buffer + wrapper de texto para o csv.DictReader ler linha-a-linha
+    with closing(body) as b:
+        wrapped = TextIOWrapper(b, encoding=encoding, newline="")
+        try:
+            yield wrapped
+        finally:
+            wrapped.close()
 
 
 # -----------------------------
 # Mapping / transformation
 # -----------------------------
-def write_mapped_csv(local_path: str, input_stream: io.StringIO, fx_usd: float):
+def write_mapped_csv(local_path: str, input_stream, fx_usd: float):
     MAX_WEATHER_CALLS_PER_FILE = int(
         os.getenv("MAX_WEATHER_CALLS_PER_FILE", "300"))
 
@@ -358,7 +375,6 @@ def finalize_ready_ingests(s3):
 
         done_request_ids: List[str] = []
 
-        # Iterar snapshot (para poderes remover do pending em segurança)
         for request_id, pinfo in list(pending.items()):
             ev = events.get(request_id)
             if not ev:
@@ -385,8 +401,7 @@ def finalize_ready_ingests(s3):
                 }
 
                 print(
-                    f"[Processor] FINALIZED OK -> uploaded={out_key} deleted={source_key} request_id={request_id}"
-                )
+                    f"[Processor] FINALIZED OK -> uploaded={out_key} deleted={source_key} request_id={request_id}")
                 done_request_ids.append(request_id)
 
             else:
@@ -398,11 +413,11 @@ def finalize_ready_ingests(s3):
                     "webhook_event": ev,
                 }
                 print(
-                    f"[Processor] FINALIZED ERROR -> status={status} source={source_key} request_id={request_id} error={ev.get('error')}"
+                    f"[Processor] FINALIZED ERROR -> status={status} source={source_key} "
+                    f"request_id={request_id} error={ev.get('error')}"
                 )
                 done_request_ids.append(request_id)
 
-        # limpeza
         for rid in done_request_ids:
             pending.pop(rid, None)
             events.pop(rid, None)
@@ -465,14 +480,19 @@ def main():
                 print(f"[Processor] Processing: {key}")
 
                 try:
-                    input_stream = download_object_to_memory(s3, key)
+                    head = s3.head_object(Bucket=BUCKET, Key=key)
+                    print(
+                        f"[Processor] Input size bytes={head.get('ContentLength')}")
+                    print(
+                        "[Processor] Reading CSV in streaming mode (no full read in memory)")
 
                     ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
                     base = os.path.basename(key).replace(".csv", "")
                     local_out = os.path.join(
                         TMP_DIR, f"{base}_mapped_{ts}.csv")
 
-                    write_mapped_csv(local_out, input_stream, fx)
+                    with open_object_text_stream(s3, key) as input_stream:
+                        write_mapped_csv(local_out, input_stream, fx)
 
                     resp = send_to_xml_service(local_out, key)
                     request_id = resp.get("_request_id")
