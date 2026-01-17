@@ -8,3 +8,6 @@ CREATE TABLE IF NOT EXISTS tp3_incidents_xml (
 
 CREATE INDEX IF NOT EXISTS idx_tp3_incidents_xml_data
   ON tp3_incidents_xml (data_criacao DESC);
+
+ALTER TABLE tp3_incidents_xml
+  ADD COLUMN IF NOT EXISTS mapper_json JSONB;

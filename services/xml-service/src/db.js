@@ -20,17 +20,27 @@ function getPool() {
   return pool;
 }
 
-export async function insertXmlDocument({ xml, mapperVersion, requestId }) {
+export async function insertXmlDocument({
+  xml,
+  mapperVersion,
+  requestId,
+  mapperJson,
+}) {
   const table = process.env.DB_TABLE || "tp3_incidents_xml";
   const p = getPool();
 
   const q = `
-    INSERT INTO ${table} (xml_documento, data_criacao, mapper_version, request_id)
-    VALUES ($1::xml, NOW(), $2, $3)
+    INSERT INTO ${table} (xml_documento, data_criacao, mapper_version, request_id, mapper_json)
+    VALUES ($1::xml, NOW(), $2, $3, $4::jsonb)
     RETURNING id
   `;
 
-  const r = await p.query(q, [xml, mapperVersion, requestId]);
+  const r = await p.query(q, [
+    xml,
+    mapperVersion,
+    requestId,
+    mapperJson || null,
+  ]);
   return r.rows[0].id;
 }
 
@@ -39,10 +49,9 @@ export async function isXmlWellFormed(xml) {
 
   // 1) caminho preferido: função booleana
   try {
-    const r = await p.query(
-      "SELECT xml_is_well_formed_document($1) AS ok",
-      [xml]
-    );
+    const r = await p.query("SELECT xml_is_well_formed_document($1) AS ok", [
+      xml,
+    ]);
     return r.rows?.[0]?.ok === true;
   } catch (e) {
     // 2) fallback: forçar parse (lança erro se inválido)

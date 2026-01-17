@@ -102,11 +102,13 @@ app.get("/query/agg/severity", async (_req, res) => {
 // - request_id
 // - mapper_version
 // - webhook_url
+// - mapper_json (JSON string, opcional mas recomendado)
 // - mapped_csv (file)
 app.post("/ingest", upload.single("mapped_csv"), async (req, res) => {
   const requestId = req.body?.request_id;
   const mapperVersion = req.body?.mapper_version;
   const webhookUrl = req.body?.webhook_url;
+  const mapperJsonRaw = req.body?.mapper_json; // string JSON (opcional)
 
   // helper: envia webhook sem rebentar o fluxo
   const safeWebhookPost = async (payload) => {
@@ -152,6 +154,20 @@ app.post("/ingest", upload.single("mapped_csv"), async (req, res) => {
       );
     }
 
+    // 2.5) mapper_json (opcional, mas se vier tem de ser JSON válido)
+    let mapperJson = null;
+    if (mapperJsonRaw) {
+      try {
+        mapperJson = JSON.parse(mapperJsonRaw);
+      } catch (_e) {
+        return await fail(
+          400,
+          "ERRO_VALIDACAO",
+          "mapper_json is not valid JSON",
+        );
+      }
+    }
+
     // 3) Parsing + build XML (continua a ser validação/transformação)
     let rows;
     let xml;
@@ -167,6 +183,13 @@ app.post("/ingest", upload.single("mapped_csv"), async (req, res) => {
     console.log(
       `[XML Service] validating generated XML (request_id=${requestId}, mapper_version=${mapperVersion}, bytes=${Buffer.byteLength(xml, "utf8")})`,
     );
+
+    if (mapperJson) {
+      console.log(
+        "[XML Service] mapper_json received -> keys=",
+        Object.keys(mapperJson),
+      );
+    }
 
     // 3.4) Fault-injection controlado (apenas para testes)
     if (
@@ -192,7 +215,12 @@ app.post("/ingest", upload.single("mapped_csv"), async (req, res) => {
     // 4) Persistência (qualquer falha aqui é ERRO_PERSISTENCIA)
     let docId;
     try {
-      docId = await insertXmlDocument({ xml, mapperVersion, requestId });
+      docId = await insertXmlDocument({
+        xml,
+        mapperVersion,
+        requestId,
+        mapperJson,
+      });
     } catch (e) {
       const msg = e?.message || "DB persistence error";
       return await fail(500, "ERRO_PERSISTENCIA", msg);

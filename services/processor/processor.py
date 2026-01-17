@@ -56,6 +56,43 @@ INIT_STATE = {
 # -----------------------------
 # XML Service integration
 # -----------------------------
+def load_mapper_json_text() -> str:
+    """
+    Lê o mapper JSON a enviar no ingest.
+    Preferência: ficheiro definido em MAPPER_FILE.
+    Fallback: gera um JSON mínimo com versão.
+    """
+    mapper_path = os.getenv("MAPPER_FILE", "/app/mapper.json")
+    mapper_version = os.getenv("MAPPER_VERSION", "1.0.0")
+
+    try:
+        with open(mapper_path, "r", encoding="utf-8") as f:
+            txt = f.read().strip()
+            if not txt:
+                raise ValueError("empty mapper file")
+            # valida que é JSON
+            json.loads(txt)
+            return txt
+    except Exception as e:
+        fallback = {
+            "version": mapper_version,
+            "mappings": {
+                "incident_id": "id_ocorrencia",
+                "incident_type": "tipo_ocorrencia",
+                "severity": "nivel_gravidade",
+                "status": "estado",
+                "city": "cidade",
+                "country": "pais",
+                "continent": "continente",
+                "lat": "latitude",
+                "lon": "longitude",
+                "estimated_cost_eur": "custo_estimado_eur"
+            },
+            "note": f"fallback mapper_json ({e})"
+        }
+        return json.dumps(fallback, ensure_ascii=False)
+
+
 def send_to_xml_service(mapped_csv_path: str, source_key: str) -> Dict[str, Any]:
     """
     Sends the mapped CSV to the XML Service via multipart/form-data.
@@ -74,6 +111,7 @@ def send_to_xml_service(mapped_csv_path: str, source_key: str) -> Dict[str, Any]
     mapper_version = os.getenv("MAPPER_VERSION", "1.0.0")
     timeout_s = int(os.getenv("XML_SERVICE_TIMEOUT_SECONDS", "20"))
     prefix = os.getenv("PROCESSOR_REQUEST_ID_PREFIX", "Processor")
+    mapper_json_text = load_mapper_json_text()
 
     # Build a unique, traceable request id
     ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
@@ -87,6 +125,7 @@ def send_to_xml_service(mapped_csv_path: str, source_key: str) -> Dict[str, Any]
             "request_id": request_id,
             "mapper_version": mapper_version,
             "webhook_url": webhook_url,
+            "mapper_json": mapper_json_text,
         }
 
         r = requests.post(ingest_url, data=data,

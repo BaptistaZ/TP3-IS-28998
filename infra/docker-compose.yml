@@ -76,6 +76,7 @@ services:
         condition: service_started
     volumes:
       - processor_tmp:/app/tmp
+      - ../services/processor/mapper.json:/app/mapper.json:ro
 
   webhook:
     build:
