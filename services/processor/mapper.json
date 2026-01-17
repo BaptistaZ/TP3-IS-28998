@@ -1,0 +1,15 @@
+{
+  "version": "1.0.0",
+  "mappings": {
+    "incident_id": "id_ocorrencia",
+    "incident_type": "tipo_ocorrencia",
+    "severity": "nivel_gravidade",
+    "status": "estado",
+    "city": "cidade",
+    "country": "pais",
+    "continent": "continente",
+    "lat": "latitude",
+    "lon": "longitude",
+    "estimated_cost_eur": "custo_estimado_eur"
+  }
+}
