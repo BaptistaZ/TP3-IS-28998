@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "@apollo/client/react";
+import { useSearchParams } from "react-router-dom";
 import { Q_INCIDENTS } from "../graphql/queries";
 
 type IncidentRow = {
@@ -36,6 +37,14 @@ function cleanStr(v: string) {
 }
 
 export default function Incidents() {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const docIdFromUrlRaw = searchParams.get("docId");
+  const docIdFromUrl = docIdFromUrlRaw ? Number(docIdFromUrlRaw) : undefined;
+
+  const [docId, setDocId] = useState<number | "">(
+    Number.isFinite(docIdFromUrl as number) ? (docIdFromUrl as number) : ""
+  );
+
   const [type, setType] = useState("");
   const [severity, setSeverity] = useState("");
   const [status, setStatus] = useState("");
@@ -44,13 +53,14 @@ export default function Incidents() {
 
   const variables = useMemo(
     () => ({
+      docId: typeof docId === "number" ? docId : undefined,
       type: cleanStr(type),
       severity: cleanStr(severity),
       status: cleanStr(status),
       country: cleanStr(country),
       limit,
     }),
-    [type, severity, status, country, limit]
+    [docId, type, severity, status, country, limit]
   );
 
   const { data, loading, error, refetch } = useQuery<IncidentsData>(Q_INCIDENTS, {
@@ -73,6 +83,26 @@ export default function Incidents() {
       <h1>Incidentes</h1>
 
       <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 16 }}>
+        <div>
+          <div style={{ opacity: 0.8, marginBottom: 6 }}>DocId</div>
+          <input
+            type="number"
+            value={docId}
+            onChange={(e) => {
+              const v = e.target.value;
+              setDocId(v === "" ? "" : Number(v));
+            }}
+            placeholder="ex: 12"
+            style={{
+              padding: 8,
+              borderRadius: 6,
+              border: "1px solid #333",
+              background: "transparent",
+              width: 110,
+            }}
+          />
+        </div>
+
         <div>
           <div style={{ opacity: 0.8, marginBottom: 6 }}>Type</div>
           <input
@@ -156,7 +186,14 @@ export default function Incidents() {
 
         <div style={{ display: "flex", alignItems: "end", gap: 10 }}>
           <button
-            onClick={() => refetch()}
+            onClick={() => {
+              if (typeof docId === "number" && Number.isFinite(docId)) {
+                setSearchParams({ docId: String(docId) });
+              } else {
+                setSearchParams({});
+              }
+              refetch();
+            }}
             style={{
               padding: "8px 12px",
               borderRadius: 6,
@@ -170,11 +207,13 @@ export default function Incidents() {
 
           <button
             onClick={() => {
+              setDocId("");
               setType("");
               setSeverity("");
               setStatus("");
               setCountry("");
               setLimit(100);
+              setSearchParams({});
             }}
             style={{
               padding: "8px 12px",
@@ -194,9 +233,6 @@ export default function Incidents() {
       {error && (
         <div>
           <p style={{ color: "salmon" }}>Erro GraphQL: {error.message}</p>
-          <p style={{ opacity: 0.8 }}>
-            Este erro era esperado se a query tivesse campos inválidos. Depois destas alterações deve desaparecer.
-          </p>
         </div>
       )}
 
@@ -240,10 +276,22 @@ export default function Incidents() {
               <tbody>
                 {rows.map((r) => (
                   <tr key={`${r.docId}:${r.incidentId}`}>
-                    <td style={{ padding: "10px 8px", borderBottom: "1px solid #222", whiteSpace: "nowrap" }}>
+                    <td
+                      style={{
+                        padding: "10px 8px",
+                        borderBottom: "1px solid #222",
+                        whiteSpace: "nowrap",
+                      }}
+                    >
                       {r.docId}
                     </td>
-                    <td style={{ padding: "10px 8px", borderBottom: "1px solid #222", whiteSpace: "nowrap" }}>
+                    <td
+                      style={{
+                        padding: "10px 8px",
+                        borderBottom: "1px solid #222",
+                        whiteSpace: "nowrap",
+                      }}
+                    >
                       {r.incidentId}
                     </td>
                     <td style={{ padding: "10px 8px", borderBottom: "1px solid #222" }}>
@@ -267,10 +315,22 @@ export default function Incidents() {
                     <td style={{ padding: "10px 8px", borderBottom: "1px solid #222" }}>
                       {typeof r.estimatedCostEur === "number" ? fmtEur(r.estimatedCostEur) : "-"}
                     </td>
-                    <td style={{ padding: "10px 8px", borderBottom: "1px solid #222", whiteSpace: "nowrap" }}>
+                    <td
+                      style={{
+                        padding: "10px 8px",
+                        borderBottom: "1px solid #222",
+                        whiteSpace: "nowrap",
+                      }}
+                    >
                       {r.reportedAt ?? "-"}
                     </td>
-                    <td style={{ padding: "10px 8px", borderBottom: "1px solid #222", whiteSpace: "nowrap" }}>
+                    <td
+                      style={{
+                        padding: "10px 8px",
+                        borderBottom: "1px solid #222",
+                        whiteSpace: "nowrap",
+                      }}
+                    >
                       {r.lastUpdateUtc ?? "-"}
                     </td>
                   </tr>
@@ -297,13 +357,21 @@ export default function Incidents() {
               {rows.slice(0, 1).map((r) => (
                 <pre
                   key={r.incidentId}
-                  style={{ padding: 12, border: "1px solid #333", borderRadius: 8, overflowX: "auto" }}
+                  style={{
+                    padding: 12,
+                    border: "1px solid #333",
+                    borderRadius: 8,
+                    overflowX: "auto",
+                  }}
                 >
                   {JSON.stringify(
                     {
                       source: r.source,
                       continent: r.continent,
-                      coords: r.lat != null && r.lon != null ? `${fmtDec1(r.lat)}, ${fmtDec1(r.lon)}` : null,
+                      coords:
+                        r.lat != null && r.lon != null
+                          ? `${fmtDec1(r.lat)}, ${fmtDec1(r.lon)}`
+                          : null,
                       validatedAt: r.validatedAt,
                       resolvedAt: r.resolvedAt,
                       assignedUnit: r.assignedUnit,

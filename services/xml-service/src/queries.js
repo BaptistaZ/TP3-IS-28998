@@ -34,13 +34,24 @@ export async function listDocs(limit = 10) {
  * Query incidents by optional filters
  * Reads from XML stored in Postgres using xmltable()
  */
-export async function queryIncidents({ type, severity, status, country, limit = 50 }) {
+export async function queryIncidents({
+  docId,
+  type,
+  severity,
+  status,
+  country,
+  limit = 50,
+}) {
   const p = getPool();
 
   const params = [];
   // Base filter to avoid empty / broken rows
   const where = ["NULLIF(x.incident_id, '') IS NOT NULL"];
 
+  if (docId != null && Number.isFinite(docId)) {
+    params.push(docId);
+    where.push(`d.id = $${params.length}`);
+  }
   if (type) {
     params.push(type);
     where.push(`x.incident_type = $${params.length}`);

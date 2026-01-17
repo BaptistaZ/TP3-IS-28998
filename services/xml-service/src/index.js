@@ -68,6 +68,20 @@ app.get("/docs", async (req, res) => {
 });
 
 app.get("/query/incidents", async (req, res) => {
+  const rawDocId = req.query.docId;
+
+  let docId = null;
+  if (rawDocId !== undefined) {
+    const n = Number(rawDocId);
+    if (!Number.isFinite(n)) {
+      return res.status(400).json({
+        ok: false,
+        error: "Invalid docId (must be a number)",
+      });
+    }
+    docId = n;
+  }
+
   const type = req.query.type?.toString();
   const severity = req.query.severity?.toString();
   const status = req.query.status?.toString();
@@ -75,13 +89,13 @@ app.get("/query/incidents", async (req, res) => {
   const limit = Number(req.query.limit || 50);
 
   const rows = await queryIncidents({
+    docId,
     type,
     severity,
     status,
     country,
     limit,
   });
-
   res.json({ ok: true, count: rows.length, rows });
 });
 

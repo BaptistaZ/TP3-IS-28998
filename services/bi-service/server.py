@@ -135,18 +135,21 @@ def resolve_health(*_) -> str:
 def resolve_docs(*_, limit: int = 10) -> List[Dict[str, Any]]:
     """List stored XML docs (metadata only) via gRPC (mantém evidência gRPC)."""
     try:
-        print(f"[BI -> gRPC] docs(limit={limit}) calling {GRPC_HOST}:{GRPC_PORT}", flush=True)
+        print(
+            f"[BI -> gRPC] docs(limit={limit}) calling {GRPC_HOST}:{GRPC_PORT}", flush=True)
         stub = grpc_stub()
         resp = stub.ListDocs(bi_pb2.ListDocsRequest(limit=limit))
         print(f"[BI -> gRPC] docs OK -> {len(resp.docs)} docs", flush=True)
         return [map_doc(d) for d in resp.docs]
     except grpc.RpcError as e:
-        raise RuntimeError(f"gRPC ListDocs failed: {e.code().name} - {e.details()}")
+        raise RuntimeError(
+            f"gRPC ListDocs failed: {e.code().name} - {e.details()}")
 
 
 @query.field("incidents")
 def resolve_incidents(
     *_,
+    docId: Optional[int] = None,
     type: Optional[str] = None,
     severity: Optional[str] = None,
     status: Optional[str] = None,
@@ -156,6 +159,7 @@ def resolve_incidents(
     """Query incidents via XML Service REST (Req 14)."""
     try:
         rows = fetch_incidents(
+            doc_id=docId, # type: ignore
             type=type,
             severity=severity,
             status=status,
@@ -243,8 +247,10 @@ app = GraphQL(schema, debug=True)
 def http_root(request):
     return RedirectResponse(url="/graphql")
 
+
 def http_health(request):
     return PlainTextResponse("ok")
+
 
 starlette_app = Starlette(
     routes=[

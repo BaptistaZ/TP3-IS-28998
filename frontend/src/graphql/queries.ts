@@ -33,8 +33,22 @@ export const Q_INCIDENTS_SAMPLE = gql`
 `;
 
 export const Q_INCIDENTS = gql`
-  query Incidents($type: String, $severity: String, $status: String, $country: String, $limit: Int) {
-    incidents(type: $type, severity: $severity, status: $status, country: $country, limit: $limit) {
+  query Incidents(
+    $docId: Int
+    $type: String
+    $severity: String
+    $status: String
+    $country: String
+    $limit: Int
+  ) {
+    incidents(
+      docId: $docId
+      type: $type
+      severity: $severity
+      status: $status
+      country: $country
+      limit: $limit
+    ) {
       docId
       incidentId
       source
@@ -69,5 +83,3 @@ export const Q_DOCS = gql`
     }
   }
 `;
-
-

@@ -48,6 +48,7 @@ type Query {
   docs(limit: Int = 10): [Doc!]!
 
   incidents(
+    docId: Int
     type: String
     severity: String
     status: String
