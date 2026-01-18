@@ -87,6 +87,7 @@ app.get("/query/incidents", async (req, res) => {
   const status = req.query.status?.toString();
   const country = req.query.country?.toString();
   const limit = Number(req.query.limit || 50);
+  const offset = Number(req.query.offset || 0);
 
   const rows = await queryIncidents({
     docId,
@@ -95,6 +96,7 @@ app.get("/query/incidents", async (req, res) => {
     status,
     country,
     limit,
+    offset,
   });
   res.json({ ok: true, count: rows.length, rows });
 });
@@ -112,19 +114,12 @@ app.get("/query/agg/severity", async (_req, res) => {
 /* ======================================================
    Ingest XML
 ====================================================== */
-// multipart fields:
-// - request_id
-// - mapper_version
-// - webhook_url
-// - mapper_json (JSON string, opcional mas recomendado)
-// - mapped_csv (file)
 app.post("/ingest", upload.single("mapped_csv"), async (req, res) => {
   const requestId = req.body?.request_id;
   const mapperVersion = req.body?.mapper_version;
   const webhookUrl = req.body?.webhook_url;
-  const mapperJsonRaw = req.body?.mapper_json; // string JSON (opcional)
+  const mapperJsonRaw = req.body?.mapper_json;
 
-  // helper: envia webhook sem rebentar o fluxo
   const safeWebhookPost = async (payload) => {
     if (!webhookUrl) return;
     try {
@@ -134,7 +129,6 @@ app.post("/ingest", upload.single("mapped_csv"), async (req, res) => {
     }
   };
 
-  // helper: resposta + webhook com status normalizado
   const fail = async (httpStatus, status, errorMsg, docId = null) => {
     const payload = {
       request_id: requestId || "unknown",
@@ -147,7 +141,6 @@ app.post("/ingest", upload.single("mapped_csv"), async (req, res) => {
   };
 
   try {
-    // 1) Validação dos campos obrigatórios
     try {
       IngestSchema.parse({
         request_id: requestId,
@@ -159,7 +152,6 @@ app.post("/ingest", upload.single("mapped_csv"), async (req, res) => {
       return await fail(400, "ERRO_VALIDACAO", msg);
     }
 
-    // 2) Ficheiro obrigatório
     if (!req.file) {
       return await fail(
         400,
@@ -168,7 +160,6 @@ app.post("/ingest", upload.single("mapped_csv"), async (req, res) => {
       );
     }
 
-    // 2.5) mapper_json (opcional, mas se vier tem de ser JSON válido)
     let mapperJson = null;
     if (mapperJsonRaw) {
       try {
@@ -182,7 +173,6 @@ app.post("/ingest", upload.single("mapped_csv"), async (req, res) => {
       }
     }
 
-    // 3) Parsing + build XML (continua a ser validação/transformação)
     let rows;
     let xml;
     try {
@@ -195,7 +185,10 @@ app.post("/ingest", upload.single("mapped_csv"), async (req, res) => {
     }
 
     console.log(
-      `[XML Service] validating generated XML (request_id=${requestId}, mapper_version=${mapperVersion}, bytes=${Buffer.byteLength(xml, "utf8")})`,
+      `[XML Service] validating generated XML (request_id=${requestId}, mapper_version=${mapperVersion}, bytes=${Buffer.byteLength(
+        xml,
+        "utf8",
+      )})`,
     );
 
     if (mapperJson) {
@@ -205,7 +198,6 @@ app.post("/ingest", upload.single("mapped_csv"), async (req, res) => {
       );
     }
 
-    // 3.4) Fault-injection controlado (apenas para testes)
     if (
       process.env.DEBUG_VALIDATION === "1" &&
       req.query?.force_invalid_xml === "1"
@@ -213,10 +205,9 @@ app.post("/ingest", upload.single("mapped_csv"), async (req, res) => {
       console.warn(
         "[XML Service] force_invalid_xml=1 -> corrupting XML for test",
       );
-      xml = xml + "<"; // torna o XML mal-formado
+      xml = xml + "<";
     }
 
-    // 3.5) Validação explícita do XML gerado (well-formed)
     const okXml = await isXmlWellFormed(xml);
     if (!okXml) {
       return await fail(
@@ -226,10 +217,9 @@ app.post("/ingest", upload.single("mapped_csv"), async (req, res) => {
       );
     }
 
-    // 4) Persistência (qualquer falha aqui é ERRO_PERSISTENCIA)
-    let docId;
+    let docIdInserted;
     try {
-      docId = await insertXmlDocument({
+      docIdInserted = await insertXmlDocument({
         xml,
         mapperVersion,
         requestId,
@@ -240,10 +230,9 @@ app.post("/ingest", upload.single("mapped_csv"), async (req, res) => {
       return await fail(500, "ERRO_PERSISTENCIA", msg);
     }
 
-    // 5) Guardar ficheiro (debug) — só se for explicitamente ativado
     if (process.env.SAVE_XML_FILES === "1") {
       try {
-        saveXmlToFile({ xml, requestId, docId });
+        saveXmlToFile({ xml, requestId, docId: docIdInserted });
       } catch (e) {
         console.warn(
           "[XML Service] saveXmlToFile failed (ignored):",
@@ -252,21 +241,18 @@ app.post("/ingest", upload.single("mapped_csv"), async (req, res) => {
       }
     }
 
-    // 6) Responder ao processor
     res.status(200).json({
       request_id: requestId,
       status: "OK",
-      db_document_id: docId,
+      db_document_id: docIdInserted,
     });
 
-    // 7) Webhook callback (assíncrono)
     await safeWebhookPost({
       request_id: requestId,
       status: "OK",
-      db_document_id: docId,
+      db_document_id: docIdInserted,
     });
   } catch (e) {
-    // fallback: algo inesperado
     const msg = e?.message || "Unhandled error";
     return await fail(500, "ERRO_PERSISTENCIA", msg);
   }

@@ -30,6 +30,11 @@ export async function listDocs(limit = 10) {
   return r.rows;
 }
 
+function cleanStr(v) {
+  const s = String(v ?? "").trim();
+  return s ? s : null;
+}
+
 /**
  * Query incidents by optional filters
  * Reads from XML stored in Postgres using xmltable()
@@ -41,6 +46,7 @@ export async function queryIncidents({
   status,
   country,
   limit = 50,
+  offset = 0,
 }) {
   const p = getPool();
 
@@ -48,28 +54,48 @@ export async function queryIncidents({
   // Base filter to avoid empty / broken rows
   const where = ["NULLIF(x.incident_id, '') IS NOT NULL"];
 
-  if (docId != null && Number.isFinite(docId)) {
-    params.push(docId);
+  const docIdNum =
+    docId != null && Number.isFinite(Number(docId))
+      ? Math.trunc(Number(docId))
+      : null;
+
+  const typeS = cleanStr(type);
+  const severityS = cleanStr(severity);
+  const statusS = cleanStr(status);
+  const countryS = cleanStr(country);
+
+  // Se não vier docId, por defeito só lê o documento mais recente.
+  if (docIdNum == null) {
+    where.push(`d.id = (SELECT MAX(id) FROM ${TABLE})`);
+  }
+
+  if (docIdNum != null) {
+    params.push(docIdNum);
     where.push(`d.id = $${params.length}`);
   }
-  if (type) {
-    params.push(type);
+  if (typeS) {
+    params.push(typeS);
     where.push(`x.incident_type = $${params.length}`);
   }
-  if (severity) {
-    params.push(severity);
+  if (severityS) {
+    params.push(severityS);
     where.push(`x.severity = $${params.length}`);
   }
-  if (status) {
-    params.push(status);
+  if (statusS) {
+    params.push(statusS);
     where.push(`x.status = $${params.length}`);
   }
-  if (country) {
-    params.push(country);
+  if (countryS) {
+    params.push(countryS);
     where.push(`x.country = $${params.length}`);
   }
 
-  params.push(limit);
+  const lim = Number.isFinite(Number(limit)) ? Math.trunc(Number(limit)) : 50;
+  const off = Number.isFinite(Number(offset))
+    ? Math.max(0, Math.trunc(Number(offset)))
+    : 0;
+  params.push(lim);
+  params.push(off);
 
   const q = `
     SELECT
@@ -97,7 +123,9 @@ export async function queryIncidents({
       NULLIF(x.eta_min_txt, '')::numeric as eta_min,
       NULLIF(x.response_time_min_txt, '')::numeric as response_time_min,
       NULLIF(x.estimated_cost_eur_txt, '')::numeric as estimated_cost_eur,
-      NULLIF(x.risk_score_txt, '')::numeric as risk_score
+      NULLIF(x.risk_score_txt, '')::numeric as risk_score,
+
+      x.notes
 
     FROM ${TABLE} d
     JOIN LATERAL xmltable(
@@ -129,11 +157,14 @@ export async function queryIncidents({
         response_time_min_txt  text PATH 'Response/ResponseTimeMinutes/text()',
 
         estimated_cost_eur_txt text PATH 'FinancialImpact/EstimatedCost[@currency="EUR"]/text()',
-        risk_score_txt         text PATH 'Assessment/RiskScore/text()'
+        risk_score_txt         text PATH 'Assessment/RiskScore/text()',
+
+        notes                  text PATH 'Meta/Notes/text()'
     ) x ON true
     ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
     ORDER BY d.id DESC
-    LIMIT $${params.length};
+    LIMIT $${params.length - 1}
+    OFFSET $${params.length};
   `;
 
   const r = await p.query(q, params);
@@ -161,7 +192,8 @@ export async function aggByType() {
         risk_score_txt          text PATH 'Assessment/RiskScore/text()',
         estimated_cost_eur_txt  text PATH 'FinancialImpact/EstimatedCost[@currency="EUR"]/text()'
     ) x ON true
-    WHERE NULLIF(x.incident_type, '') IS NOT NULL
+    WHERE d.id = (SELECT MAX(id) FROM ${TABLE})
+      AND NULLIF(x.incident_type, '') IS NOT NULL
     GROUP BY x.incident_type
     ORDER BY total_estimated_cost_eur DESC NULLS LAST;
   `;
@@ -189,7 +221,8 @@ export async function aggBySeverity() {
         severity       text PATH '@Severity',
         risk_score_txt text PATH 'Assessment/RiskScore/text()'
     ) x ON true
-    WHERE NULLIF(x.severity, '') IS NOT NULL
+    WHERE d.id = (SELECT MAX(id) FROM ${TABLE})
+      AND NULLIF(x.severity, '') IS NOT NULL
     GROUP BY x.severity
     ORDER BY total_incidents DESC;
   `;

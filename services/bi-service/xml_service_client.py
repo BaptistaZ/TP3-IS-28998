@@ -5,7 +5,7 @@ import requests
 
 XML_BASE_URL = os.getenv("XML_SERVICE_BASE_URL",
                          "http://xml-service:7001").rstrip("/")
-TIMEOUT = float(os.getenv("XML_SERVICE_TIMEOUT_SECONDS", "10"))
+TIMEOUT = float(os.getenv("XML_SERVICE_TIMEOUT_SECONDS", "60"))
 
 
 def _get(path: str, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
@@ -23,6 +23,7 @@ def fetch_incidents(
     status: Optional[str] = None,
     country: Optional[str] = None,
     limit: int = 50,
+    offset: int = 0,
 ) -> List[Dict[str, Any]]:
     params: Dict[str, Any] = {
         "type": type or "",
@@ -30,6 +31,7 @@ def fetch_incidents(
         "status": status or "",
         "country": country or "",
         "limit": limit,
+        "offset": offset,
     }
     if doc_id is not None:
         params["docId"] = doc_id

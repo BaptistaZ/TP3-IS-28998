@@ -10,7 +10,6 @@ from ariadne.asgi import GraphQL
 import uvicorn
 
 from starlette.applications import Starlette
-from starlette.responses import JSONResponse
 from starlette.routing import Route, Mount
 from starlette.responses import RedirectResponse, PlainTextResponse
 
@@ -25,29 +24,18 @@ import bi_pb2_grpc
 
 load_dotenv()
 
-# -----------------------------
-# Config
-# -----------------------------
 BI_PORT = int(os.getenv("PORT") or os.getenv("BI_SERVICE_PORT", "4000"))
 
-# gRPC BI Service endpoint (mantemos para docs)
 GRPC_HOST = os.getenv("GRPC_SERVICE_HOST", "grpc-service")
 GRPC_PORT = int(os.getenv("GRPC_SERVICE_PORT", "50051"))
 
 
-# -----------------------------
-# gRPC helpers
-# -----------------------------
 def grpc_stub() -> bi_pb2_grpc.BIServiceStub:
-    """Create a gRPC stub to talk to BIService."""
     target = f"{GRPC_HOST}:{GRPC_PORT}"
     channel = grpc.insecure_channel(target)
     return bi_pb2_grpc.BIServiceStub(channel)
 
 
-# -----------------------------
-# Safe converters
-# -----------------------------
 def _to_int(v: Any, default: int = 0) -> int:
     try:
         if v is None:
@@ -71,16 +59,12 @@ def _to_float(v: Any) -> Optional[float]:
 
 
 def _safe_float(v: Any) -> Optional[float]:
-    """Backwards compatibility for gRPC mapping (protobuf numeric)."""
     try:
         return float(v)
     except Exception:
         return None
 
 
-# -----------------------------
-# Helpers (gRPC -> GraphQL mapping)
-# -----------------------------
 def map_doc(d: Any) -> Dict[str, Any]:
     return {
         "id": int(d.id),
@@ -90,7 +74,6 @@ def map_doc(d: Any) -> Dict[str, Any]:
 
 
 def map_incident(i: Any) -> Dict[str, Any]:
-    # (mantido caso uses gRPC noutros resolvers futuramente)
     return {
         "docId": int(i.doc_id),
         "incidentId": str(i.incident_id),
@@ -117,9 +100,6 @@ def map_incident(i: Any) -> Dict[str, Any]:
     }
 
 
-# -----------------------------
-# GraphQL schema + resolvers (Ariadne)
-# -----------------------------
 schema_path = Path(__file__).with_name("schema.graphql")
 type_defs = gql(schema_path.read_text(encoding="utf-8"))
 
@@ -133,7 +113,6 @@ def resolve_health(*_) -> str:
 
 @query.field("docs")
 def resolve_docs(*_, limit: int = 10) -> List[Dict[str, Any]]:
-    """List stored XML docs (metadata only) via gRPC (mantém evidência gRPC)."""
     try:
         print(
             f"[BI -> gRPC] docs(limit={limit}) calling {GRPC_HOST}:{GRPC_PORT}", flush=True)
@@ -155,16 +134,17 @@ def resolve_incidents(
     status: Optional[str] = None,
     country: Optional[str] = None,
     limit: int = 50,
+    offset: int = 0,
 ) -> List[Dict[str, Any]]:
-    """Query incidents via XML Service REST (Req 14)."""
     try:
         rows = fetch_incidents(
-            doc_id=docId, # type: ignore
+            doc_id=docId,
             type=type,
             severity=severity,
             status=status,
             country=country,
             limit=limit,
+            offset=offset,
         )
 
         out: List[Dict[str, Any]] = []
@@ -193,6 +173,7 @@ def resolve_incidents(
                     "responseTimeMin": _to_float(r.get("response_time_min")),
                     "estimatedCostEur": _to_float(r.get("estimated_cost_eur")),
                     "riskScore": _to_float(r.get("risk_score")),
+                    "notes": r.get("notes"),
                 }
             )
         return out
@@ -203,7 +184,6 @@ def resolve_incidents(
 
 @query.field("aggByType")
 def resolve_agg_by_type(*_) -> List[Dict[str, Any]]:
-    """Aggregation grouped by incident type via XML Service REST (Req 14)."""
     try:
         rows = fetch_agg_by_type()
         out: List[Dict[str, Any]] = []
@@ -223,7 +203,6 @@ def resolve_agg_by_type(*_) -> List[Dict[str, Any]]:
 
 @query.field("aggBySeverity")
 def resolve_agg_by_severity(*_) -> List[Dict[str, Any]]:
-    """Aggregation grouped by severity via XML Service REST (Req 14)."""
     try:
         rows = fetch_agg_by_severity()
         out: List[Dict[str, Any]] = []

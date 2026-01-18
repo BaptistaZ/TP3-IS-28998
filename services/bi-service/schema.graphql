@@ -27,6 +27,7 @@ type Incident {
   responseTimeMin: Float
   estimatedCostEur: Float
   riskScore: Float
+  notes: String
 }
 
 type AggByTypeRow {
@@ -54,6 +55,7 @@ type Query {
     status: String
     country: String
     limit: Int = 50
+    offset: Int = 0
   ): [Incident!]!
 
   aggByType: [AggByTypeRow!]!

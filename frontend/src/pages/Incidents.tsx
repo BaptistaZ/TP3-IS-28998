@@ -136,8 +136,11 @@ export default function Incidents() {
 
   const [selected, setSelected] = useState<IncidentRow | null>(null);
 
-  // Paginação “segura” sem offset real
-  const fetchLimit = limit * (page + 1);
+  // Paginação com offset real (evita fetchLimit = limit*(page+1))
+  // Pedimos +1 linha para detetar se existe próxima página.
+  const safeLimit = clampInt(limit, 10, 2000);
+  const offset = Math.max(0, page) * safeLimit;
+  const requestLimit = safeLimit + 1;
 
   const variables = useMemo(
     () => ({
@@ -146,14 +149,15 @@ export default function Incidents() {
       severity: nonEmptyTrim(severity),
       status: nonEmptyTrim(status),
       country: nonEmptyTrim(country),
-      limit: fetchLimit,
+      limit: requestLimit,
+      offset,
     }),
-    [docId, type, severity, status, country, fetchLimit]
+    [docId, type, severity, status, country, requestLimit, offset]
   );
 
   const { data, loading, error, refetch } = useQuery<IncidentsData>(Q_INCIDENTS, {
     variables,
-    fetchPolicy: "cache-and-network",
+    fetchPolicy: "cache-first",
   });
 
   const rows = useMemo(() => data?.incidents ?? [], [data?.incidents]);
@@ -272,18 +276,12 @@ export default function Incidents() {
     [allCols, visibleColumns]
   );
 
-  // safePage evita efeitos/setState para corrigir range
-  const maxPage = Math.max(0, Math.ceil(rows.length / limit) - 1);
-  const safePage = Math.min(page, maxPage);
-  const pageStart = safePage * limit;
-
-  const pagedRows = useMemo(() => {
-    return rows.slice(pageStart, pageStart + limit);
-  }, [rows, pageStart, limit]);
-
+  const safePage = Math.max(0, page);
+  const hasNext = rows.length > safeLimit;
+  const pagedRows = useMemo(() => rows.slice(0, safeLimit), [rows, safeLimit]);
+  const pageStart = safePage * safeLimit;
   const pageEnd = pageStart + pagedRows.length;
   const hasPrev = safePage > 0;
-  const hasNext = rows.length === fetchLimit; // heurística
 
   function syncUrl(nextPage: number) {
     const next: Record<string, string> = {};
@@ -415,7 +413,8 @@ export default function Incidents() {
                     severity: nonEmptyTrim(severity),
                     status: nonEmptyTrim(status),
                     country: nonEmptyTrim(country),
-                    limit,
+                    limit: safeLimit + 1,
+                    offset: 0,
                   });
                 }}
               >
@@ -477,12 +476,10 @@ export default function Incidents() {
             loading
               ? "A carregar…"
               : error
-              ? "Falha ao carregar."
-              : rows.length === 0
-              ? "Linhas: 0"
-              : `A mostrar ${fmtInt(pageStart + 1)}–${fmtInt(pageEnd)} de ${fmtInt(rows.length)}${
-                  hasNext ? "+" : ""
-                }`
+                ? "Falha ao carregar."
+                : rows.length === 0
+                  ? "Linhas: 0"
+                  : `A mostrar ${fmtInt(pageStart + 1)}–${fmtInt(pageEnd)}${hasNext ? " +" : ""}`
           }
           actions={
             <ColumnPicker

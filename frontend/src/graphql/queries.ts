@@ -40,6 +40,7 @@ export const Q_INCIDENTS = gql`
     $status: String
     $country: String
     $limit: Int
+    $offset: Int
   ) {
     incidents(
       docId: $docId
@@ -48,6 +49,7 @@ export const Q_INCIDENTS = gql`
       status: $status
       country: $country
       limit: $limit
+      offset: $offset
     ) {
       docId
       incidentId
@@ -74,7 +76,6 @@ export const Q_INCIDENTS = gql`
     }
   }
 `;
-
 
 export const Q_DOCS = gql`
   query Docs($limit: Int) {
