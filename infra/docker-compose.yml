@@ -117,6 +117,18 @@ services:
     ports:
       - "4000:4000"
 
+  frontend:
+    build:
+      context: ../frontend
+      dockerfile: Dockerfile
+    container_name: frontend
+    ports:
+      - "8080:80"
+    depends_on:
+      - bi-service
+    restart: unless-stopped
+
+
 volumes:
   tp3_pgdata:
   processor_tmp:
