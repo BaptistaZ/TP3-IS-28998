@@ -1,0 +1,32 @@
+.page {
+  display: grid;
+  gap: 14px;
+}
+
+.chartsGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+@media (max-width: 900px) {
+  .chartsGrid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.chartSkeleton {
+  height: 320px;
+}
+
+.chartSkeletonTall {
+  height: 380px;
+}
+
+.chartBox {
+  height: 320px;
+}
+
+.chartBoxTall {
+  height: 380px;
+}

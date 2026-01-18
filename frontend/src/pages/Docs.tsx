@@ -1,17 +1,24 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "@apollo/client/react";
-import { Link } from "react-router-dom";
 import { Q_DOCS } from "../graphql/queries";
+
+import { PageHeader, Section, Card } from "../components/ui/Layout";
+import { Toolbar } from "../components/ui/Toolbar";
+import { Input } from "../components/ui/Input";
+import { Button, LinkButton } from "../components/ui/Button";
+import { Alert } from "../components/ui/Alert";
+import { Table, type TableColumn } from "../components/ui/Table";
+import { EmptyState } from "../components/ui/EmptyState";
+import { Skeleton } from "../components/ui/Skeleton";
+import styles from "./docs.module.css";
+import { fmtDateTime, fmtInt } from "../lib/format";
 
 type DocRow = {
   id: number;
   mapperVersion: string;
   createdAt: string;
 };
-
-type DocsData = {
-  docs: DocRow[];
-};
+type DocsData = { docs: DocRow[] };
 
 export default function Docs() {
   const [limit, setLimit] = useState(50);
@@ -20,119 +27,106 @@ export default function Docs() {
 
   const { data, loading, error, refetch } = useQuery<DocsData>(Q_DOCS, {
     variables,
+    fetchPolicy: "cache-and-network",
   });
 
   const rows = data?.docs ?? [];
 
+  const cols: Array<TableColumn<DocRow>> = [
+    {
+      key: "id",
+      header: "Doc ID",
+      mono: true,
+      render: (r) => r.id,
+    },
+    {
+      key: "mapperVersion",
+      header: "Mapper version",
+      mono: true,
+      render: (r) => r.mapperVersion,
+    },
+    {
+      key: "createdAt",
+      header: "Created at",
+      mono: true,
+      render: (r) => fmtDateTime(r.createdAt),
+    },
+    {
+      key: "actions",
+      header: "Ações",
+      render: (r) => (
+        <LinkButton to={`/incidents?docId=${encodeURIComponent(String(r.id))}`} size="sm" variant="primary">
+          Ver incidentes
+        </LinkButton>
+      ),
+    },
+  ];
+
   return (
-    <div style={{ padding: 16 }}>
-      <h1>Documentos</h1>
+    <div className={styles.page}>
+      <PageHeader
+        title="Documentos"
+        subtitle={
+          <>
+            Lista de documentos processados. O botão “Ver incidentes” abre a página de incidentes com <code>docId</code> no URL.
+          </>
+        }
+      />
 
-      <div style={{ display: "flex", gap: 12, alignItems: "end", flexWrap: "wrap", marginBottom: 16 }}>
-        <div>
-          <div style={{ opacity: 0.8, marginBottom: 6 }}>Limit</div>
-          <input
-            type="number"
-            value={limit}
-            onChange={(e) => setLimit(Number(e.target.value))}
-            min={1}
-            max={5000}
-            step={10}
-            style={{
-              padding: 8,
-              borderRadius: 6,
-              border: "1px solid #333",
-              background: "transparent",
-              width: 120,
-            }}
-          />
-        </div>
+      <Section>
+        <Toolbar
+          left={
+            <div className={styles.toolbarLeft}>
+              <div className={styles.limitBox}>
+                <Input
+                  label="Limit"
+                  type="number"
+                  value={limit}
+                  onChange={(e) => setLimit(Number(e.target.value))}
+                  min={1}
+                  max={5000}
+                  step={10}
+                  size="sm"
+                />
+              </div>
 
-        <button
-          onClick={() => refetch()}
-          style={{
-            padding: "8px 12px",
-            borderRadius: 6,
-            border: "1px solid #333",
-            background: "transparent",
-            cursor: "pointer",
-          }}
-        >
-          Carregar
-        </button>
-      </div>
-
-      {loading && <p>A carregar documentos...</p>}
+              <div className={styles.resultsMeta} title="Número de linhas recebidas">
+                <span className={styles.resultsLabel}>Resultados</span>
+                <span className={styles.resultsValue}>{fmtInt(rows.length)}</span>
+              </div>
+            </div>
+          }
+          right={
+            <Button onClick={() => refetch()} disabled={loading} variant="primary">
+              {loading ? "A carregar..." : "Carregar"}
+            </Button>
+          }
+        />
+      </Section>
 
       {error && (
-        <div>
-          <p style={{ color: "salmon" }}>Erro GraphQL: {error.message}</p>
-        </div>
+        <Alert variant="danger" title="Erro GraphQL">
+          {error.message}
+        </Alert>
       )}
 
-      {!loading && !error && (
-        <div>
-          <p style={{ opacity: 0.8 }}>Resultados: {rows.length}</p>
-
-          <div style={{ overflowX: "auto" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse" }}>
-              <thead>
-                <tr>
-                  {["Doc ID", "Mapper version", "Created at", "Ações"].map((h) => (
-                    <th
-                      key={h}
-                      style={{
-                        textAlign: "left",
-                        padding: "10px 8px",
-                        borderBottom: "1px solid #333",
-                        opacity: 0.85,
-                        whiteSpace: "nowrap",
-                      }}
-                    >
-                      {h}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-
-              <tbody>
-                {rows.map((r) => (
-                  <tr key={r.id}>
-                    <td style={{ padding: "10px 8px", borderBottom: "1px solid #222", whiteSpace: "nowrap" }}>
-                      {r.id}
-                    </td>
-                    <td style={{ padding: "10px 8px", borderBottom: "1px solid #222", whiteSpace: "nowrap" }}>
-                      {r.mapperVersion}
-                    </td>
-                    <td style={{ padding: "10px 8px", borderBottom: "1px solid #222", whiteSpace: "nowrap" }}>
-                      {r.createdAt}
-                    </td>
-                    <td style={{ padding: "10px 8px", borderBottom: "1px solid #222", whiteSpace: "nowrap" }}>
-                      {/* Vai funcionar totalmente depois de adicionarmos docId ao query incidents no BI */}
-                      <Link to={`/incidents?docId=${encodeURIComponent(String(r.id))}`} style={{ opacity: 0.9 }}>
-                        Ver incidentes deste doc
-                      </Link>
-                    </td>
-                  </tr>
-                ))}
-
-                {rows.length === 0 && (
-                  <tr>
-                    <td colSpan={4} style={{ padding: 12, opacity: 0.8 }}>
-                      Sem documentos.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-
-          <p style={{ opacity: 0.7, marginTop: 10 }}>
-            Nota: o link “Ver incidentes deste doc” fica 100% funcional quando o BI aceitar o argumento opcional{" "}
-            <code>docId</code> na query <code>incidents</code>.
-          </p>
-        </div>
-      )}
+      <Section>
+        <Card title="Tabela de documentos" subtitle="Zebra + hover, com scroll horizontal em ecrãs pequenos.">
+          {loading && rows.length === 0 ? (
+            <Skeleton className={styles.tableSkeleton} />
+          ) : rows.length === 0 ? (
+            <EmptyState title="Sem documentos" text="A query devolveu zero linhas para o limit atual." />
+          ) : (
+            <Table
+              columns={cols}
+              rows={rows}
+              rowKey={(r) => String(r.id)}
+              compact
+              empty={<EmptyState title="Sem documentos" />}
+            />
+          )}
+        </Card>
+      </Section>
     </div>
   );
 }

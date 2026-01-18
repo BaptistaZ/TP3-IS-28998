@@ -1,0 +1,18 @@
+.u-row { display:flex; gap:12px; align-items:center; }
+.u-row-wrap { display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
+.u-stack { display:grid; gap:12px; }
+.u-spread { display:flex; align-items:center; justify-content:space-between; gap:12px; }
+
+.u-mono { font-family: var(--mono); }
+.u-muted { color: var(--muted); }
+.u-muted-2 { color: var(--muted-2); }
+
+.u-truncate { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.u-scrollX { overflow-x:auto; }
+
+.u-srOnly {
+  position:absolute; width:1px; height:1px; padding:0; margin:-1px;
+  overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0;
+}
+
+.u-divider { height:1px; background: var(--border); }

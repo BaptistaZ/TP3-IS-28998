@@ -1,0 +1,40 @@
+.page {
+  display: grid;
+  gap: 14px;
+}
+
+.toolbarLeft {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.limitBox {
+  width: 160px;
+}
+
+.resultsMeta {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.resultsLabel {
+  font-size: 12px;
+  color: var(--muted);
+  font-weight: 650;
+}
+
+.resultsValue {
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.tableSkeleton {
+  height: 280px;
+}

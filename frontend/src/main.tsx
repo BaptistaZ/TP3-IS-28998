@@ -4,7 +4,10 @@ import { ApolloProvider } from "@apollo/client/react";
 import { BrowserRouter } from "react-router-dom";
 import { apolloClient } from "./lib/apollo";
 import App from "./App";
-import "./index.css";
+
+import "./styles/theme.css";
+import "./styles/globals.css";
+import "./styles/helpers.css";
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>

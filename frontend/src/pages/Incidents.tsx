@@ -3,6 +3,20 @@ import { useQuery } from "@apollo/client/react";
 import { useSearchParams } from "react-router-dom";
 import { Q_INCIDENTS } from "../graphql/queries";
 
+import { PageHeader, Section, Card } from "../components/ui/Layout";
+import { Toolbar } from "../components/ui/Toolbar";
+import { Input } from "../components/ui/Input";
+import { Button } from "../components/ui/Button";
+import { Chip, Badge } from "../components/ui/Badge";
+import { Alert } from "../components/ui/Alert";
+import { Table, type TableColumn } from "../components/ui/Table";
+import { Skeleton } from "../components/ui/Skeleton";
+import { EmptyState } from "../components/ui/EmptyState";
+import { CopyPill } from "../components/ui/CopyButton";
+
+import styles from "./incidents.module.css";
+import { fmtDateTime, fmtDec, fmtEur, fmtInt, nonEmptyTrim } from "../lib/format";
+
 type IncidentRow = {
   docId: number;
   incidentId: string;
@@ -27,13 +41,26 @@ type IncidentRow = {
   riskScore: number | null;
 };
 
-type IncidentsData = {
-  incidents: IncidentRow[];
-};
+type IncidentsData = { incidents: IncidentRow[] };
 
-function cleanStr(v: string) {
-  const t = v.trim();
-  return t.length === 0 ? undefined : t;
+function severityVariant(sev: string | null): "danger" | "warning" | "info" | "neutral" {
+  if (!sev) return "neutral";
+  const n = Number(sev);
+  if (!Number.isFinite(n)) return "neutral";
+  if (n <= 2) return "danger";
+  if (n === 3) return "warning";
+  if (n === 4) return "info";
+  return "neutral";
+}
+
+function statusVariant(st: string | null): "success" | "warning" | "danger" | "neutral" | "info" {
+  const s = (st ?? "").toLowerCase();
+  if (!s) return "neutral";
+  if (s === "open") return "danger";
+  if (s === "pending" || s === "triage") return "warning";
+  if (s === "validated") return "info";
+  if (s === "resolved" || s === "closed") return "success";
+  return "neutral";
 }
 
 export default function Incidents() {
@@ -54,340 +81,203 @@ export default function Incidents() {
   const variables = useMemo(
     () => ({
       docId: typeof docId === "number" ? docId : undefined,
-      type: cleanStr(type),
-      severity: cleanStr(severity),
-      status: cleanStr(status),
-      country: cleanStr(country),
+      type: nonEmptyTrim(type),
+      severity: nonEmptyTrim(severity),
+      status: nonEmptyTrim(status),
+      country: nonEmptyTrim(country),
       limit,
     }),
     [docId, type, severity, status, country, limit]
   );
 
-  const { data, loading, error, refetch } = useQuery<IncidentsData>(Q_INCIDENTS, {
-    variables,
-  });
-
+  const { data, loading, error, refetch } = useQuery<IncidentsData>(Q_INCIDENTS, { variables });
   const rows = data?.incidents ?? [];
 
-  const fmtEur = (n: number) =>
-    n.toLocaleString("pt-PT", { style: "currency", currency: "EUR" });
+  const chips = useMemo(() => {
+    const items: Array<{ key: string; label: string; onRemove: () => void }> = [];
 
-  const fmtDec2 = (n: number) =>
-    n.toLocaleString("pt-PT", { maximumFractionDigits: 2 });
+    if (typeof docId === "number") items.push({ key: "docId", label: `docId=${docId}`, onRemove: () => setDocId("") });
+    if (nonEmptyTrim(type)) items.push({ key: "type", label: `type=${type.trim()}`, onRemove: () => setType("") });
+    if (nonEmptyTrim(severity)) items.push({ key: "severity", label: `severity=${severity.trim()}`, onRemove: () => setSeverity("") });
+    if (nonEmptyTrim(status)) items.push({ key: "status", label: `status=${status.trim()}`, onRemove: () => setStatus("") });
+    if (nonEmptyTrim(country)) items.push({ key: "country", label: `country=${country.trim()}`, onRemove: () => setCountry("") });
 
-  const fmtDec1 = (n: number) =>
-    n.toLocaleString("pt-PT", { maximumFractionDigits: 1 });
+    return items;
+  }, [docId, type, severity, status, country]);
+
+  const cols: Array<TableColumn<IncidentRow>> = [
+    { key: "docId", header: "Doc", mono: true, render: (r) => r.docId },
+    {
+      key: "incidentId",
+      header: "Incident ID",
+      render: (r) => <CopyPill value={r.incidentId} />,
+    },
+    { key: "type", header: "Type", render: (r) => r.incidentType ?? "-" },
+    {
+      key: "severity",
+      header: "Severity",
+      render: (r) => <Badge variant={severityVariant(r.severity)}>{r.severity ?? "-"}</Badge>,
+    },
+    {
+      key: "status",
+      header: "Status",
+      render: (r) => <Badge variant={statusVariant(r.status)}>{r.status ?? "-"}</Badge>,
+    },
+    { key: "country", header: "Country", render: (r) => r.country ?? "-" },
+    { key: "city", header: "City", render: (r) => r.city ?? "-" },
+    {
+      key: "risk",
+      header: "Risk",
+      align: "right",
+      render: (r) => (typeof r.riskScore === "number" ? fmtDec(r.riskScore, 2) : "-"),
+    },
+    {
+      key: "cost",
+      header: "Cost (EUR)",
+      align: "right",
+      render: (r) => (typeof r.estimatedCostEur === "number" ? fmtEur(r.estimatedCostEur) : "-"),
+    },
+    {
+      key: "reported",
+      header: "Reported",
+      mono: true,
+      render: (r) => (r.reportedAt ? fmtDateTime(r.reportedAt) : "-"),
+    },
+    {
+      key: "updated",
+      header: "Last update",
+      mono: true,
+      render: (r) => (r.lastUpdateUtc ? fmtDateTime(r.lastUpdateUtc) : "-"),
+    },
+  ];
 
   return (
-    <div style={{ padding: 16 }}>
-      <h1>Incidentes</h1>
+    <div className={styles.page}>
+      <PageHeader
+        title="Incidentes"
+        subtitle={
+          <>
+            Filtros por <code>docId/type/severity/status/country</code>. As tabelas fazem scroll horizontal em ecrãs pequenos.
+          </>
+        }
+      />
 
-      <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 16 }}>
-        <div>
-          <div style={{ opacity: 0.8, marginBottom: 6 }}>DocId</div>
-          <input
-            type="number"
-            value={docId}
-            onChange={(e) => {
-              const v = e.target.value;
-              setDocId(v === "" ? "" : Number(v));
-            }}
-            placeholder="ex: 12"
-            style={{
-              padding: 8,
-              borderRadius: 6,
-              border: "1px solid #333",
-              background: "transparent",
-              width: 110,
-            }}
-          />
-        </div>
+      <Section>
+        <Toolbar
+          title="Filtros"
+          left={
+            <div className={styles.filters}>
+              <div className={styles.fDoc}>
+                <Input
+                  label="DocId"
+                  type="number"
+                  value={docId}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setDocId(v === "" ? "" : Number(v));
+                  }}
+                  placeholder="ex: 12"
+                  size="sm"
+                />
+              </div>
 
-        <div>
-          <div style={{ opacity: 0.8, marginBottom: 6 }}>Type</div>
-          <input
-            value={type}
-            onChange={(e) => setType(e.target.value)}
-            placeholder="ex: fire"
-            style={{
-              padding: 8,
-              borderRadius: 6,
-              border: "1px solid #333",
-              background: "transparent",
-            }}
-          />
-        </div>
+              <Input label="Type" value={type} onChange={(e) => setType(e.target.value)} placeholder="ex: fire" size="sm" />
+              <Input label="Severity" value={severity} onChange={(e) => setSeverity(e.target.value)} placeholder="1..5" size="sm" />
+              <Input label="Status" value={status} onChange={(e) => setStatus(e.target.value)} placeholder="ex: open" size="sm" />
+              <Input label="Country" value={country} onChange={(e) => setCountry(e.target.value)} placeholder="ex: PT" size="sm" />
 
-        <div>
-          <div style={{ opacity: 0.8, marginBottom: 6 }}>Severity</div>
-          <input
-            value={severity}
-            onChange={(e) => setSeverity(e.target.value)}
-            placeholder="1..5"
-            style={{
-              padding: 8,
-              borderRadius: 6,
-              border: "1px solid #333",
-              background: "transparent",
-              width: 90,
-            }}
-          />
-        </div>
+              <div className={styles.fLimit}>
+                <Input
+                  label="Limit"
+                  type="number"
+                  value={limit}
+                  onChange={(e) => setLimit(Number(e.target.value))}
+                  min={10}
+                  max={2000}
+                  step={10}
+                  size="sm"
+                />
+              </div>
+            </div>
+          }
+          chips={
+            chips.length > 0 ? (
+              <>
+                {chips.map((c) => (
+                  <Chip key={c.key} strong onRemove={c.onRemove}>
+                    {c.label}
+                  </Chip>
+                ))}
+              </>
+            ) : undefined
+          }
+          right={
+            <div className={styles.actions}>
+              <Button
+                variant="primary"
+                disabled={loading}
+                onClick={() => {
+                  if (typeof docId === "number" && Number.isFinite(docId)) setSearchParams({ docId: String(docId) });
+                  else setSearchParams({});
+                  refetch();
+                }}
+              >
+                Aplicar
+              </Button>
 
-        <div>
-          <div style={{ opacity: 0.8, marginBottom: 6 }}>Status</div>
-          <input
-            value={status}
-            onChange={(e) => setStatus(e.target.value)}
-            placeholder="ex: open"
-            style={{
-              padding: 8,
-              borderRadius: 6,
-              border: "1px solid #333",
-              background: "transparent",
-            }}
-          />
-        </div>
-
-        <div>
-          <div style={{ opacity: 0.8, marginBottom: 6 }}>Country</div>
-          <input
-            value={country}
-            onChange={(e) => setCountry(e.target.value)}
-            placeholder="ex: PT"
-            style={{
-              padding: 8,
-              borderRadius: 6,
-              border: "1px solid #333",
-              background: "transparent",
-              width: 110,
-            }}
-          />
-        </div>
-
-        <div>
-          <div style={{ opacity: 0.8, marginBottom: 6 }}>Limit</div>
-          <input
-            type="number"
-            value={limit}
-            onChange={(e) => setLimit(Number(e.target.value))}
-            min={10}
-            max={2000}
-            step={10}
-            style={{
-              padding: 8,
-              borderRadius: 6,
-              border: "1px solid #333",
-              background: "transparent",
-              width: 110,
-            }}
-          />
-        </div>
-
-        <div style={{ display: "flex", alignItems: "end", gap: 10 }}>
-          <button
-            onClick={() => {
-              if (typeof docId === "number" && Number.isFinite(docId)) {
-                setSearchParams({ docId: String(docId) });
-              } else {
-                setSearchParams({});
-              }
-              refetch();
-            }}
-            style={{
-              padding: "8px 12px",
-              borderRadius: 6,
-              border: "1px solid #333",
-              background: "transparent",
-              cursor: "pointer",
-            }}
-          >
-            Aplicar
-          </button>
-
-          <button
-            onClick={() => {
-              setDocId("");
-              setType("");
-              setSeverity("");
-              setStatus("");
-              setCountry("");
-              setLimit(100);
-              setSearchParams({});
-            }}
-            style={{
-              padding: "8px 12px",
-              borderRadius: 6,
-              border: "1px solid #333",
-              background: "transparent",
-              cursor: "pointer",
-            }}
-          >
-            Limpar
-          </button>
-        </div>
-      </div>
-
-      {loading && <p>A carregar incidentes...</p>}
+              <Button
+                disabled={loading}
+                onClick={() => {
+                  setDocId("");
+                  setType("");
+                  setSeverity("");
+                  setStatus("");
+                  setCountry("");
+                  setLimit(100);
+                  setSearchParams({});
+                }}
+              >
+                Limpar
+              </Button>
+            </div>
+          }
+        />
+      </Section>
 
       {error && (
-        <div>
-          <p style={{ color: "salmon" }}>Erro GraphQL: {error.message}</p>
-        </div>
+        <Alert variant="danger" title="Erro GraphQL">
+          {error.message}
+        </Alert>
       )}
 
-      {!loading && !error && (
-        <div>
-          <p style={{ opacity: 0.8 }}>Resultados: {rows.length}</p>
+      <Section>
+        <Card
+          title="Resultados"
+          subtitle={
+            loading ? "A carregar…" : error ? "Falha ao carregar." : `Linhas: ${fmtInt(rows.length)}`
+          }
+        >
+          {loading && rows.length === 0 ? (
+            <Skeleton className={styles.tableSkeleton} />
+          ) : !loading && !error && rows.length === 0 ? (
+            <EmptyState
+              title="Sem resultados"
+              text="Sem linhas para os filtros atuais. Ajusta severidade/status ou aumenta o limit."
+              actions={
+                <Button onClick={() => refetch()} variant="primary">
+                  Recarregar
+                </Button>
+              }
+            />
+          ) : (
+            <Table columns={cols} rows={rows} rowKey={(r) => `${r.docId}:${r.incidentId}`} compact />
+          )}
 
-          <div style={{ overflowX: "auto" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse" }}>
-              <thead>
-                <tr>
-                  {[
-                    "Doc",
-                    "IncidentId",
-                    "Type",
-                    "Severity",
-                    "Status",
-                    "Country",
-                    "City",
-                    "Risk",
-                    "Cost (EUR)",
-                    "Reported",
-                    "Last update",
-                  ].map((h) => (
-                    <th
-                      key={h}
-                      style={{
-                        textAlign: "left",
-                        padding: "10px 8px",
-                        borderBottom: "1px solid #333",
-                        opacity: 0.85,
-                        whiteSpace: "nowrap",
-                      }}
-                    >
-                      {h}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-
-              <tbody>
-                {rows.map((r) => (
-                  <tr key={`${r.docId}:${r.incidentId}`}>
-                    <td
-                      style={{
-                        padding: "10px 8px",
-                        borderBottom: "1px solid #222",
-                        whiteSpace: "nowrap",
-                      }}
-                    >
-                      {r.docId}
-                    </td>
-                    <td
-                      style={{
-                        padding: "10px 8px",
-                        borderBottom: "1px solid #222",
-                        whiteSpace: "nowrap",
-                      }}
-                    >
-                      {r.incidentId}
-                    </td>
-                    <td style={{ padding: "10px 8px", borderBottom: "1px solid #222" }}>
-                      {r.incidentType ?? "-"}
-                    </td>
-                    <td style={{ padding: "10px 8px", borderBottom: "1px solid #222" }}>
-                      {r.severity ?? "-"}
-                    </td>
-                    <td style={{ padding: "10px 8px", borderBottom: "1px solid #222" }}>
-                      {r.status ?? "-"}
-                    </td>
-                    <td style={{ padding: "10px 8px", borderBottom: "1px solid #222" }}>
-                      {r.country ?? "-"}
-                    </td>
-                    <td style={{ padding: "10px 8px", borderBottom: "1px solid #222" }}>
-                      {r.city ?? "-"}
-                    </td>
-                    <td style={{ padding: "10px 8px", borderBottom: "1px solid #222" }}>
-                      {typeof r.riskScore === "number" ? fmtDec2(r.riskScore) : "-"}
-                    </td>
-                    <td style={{ padding: "10px 8px", borderBottom: "1px solid #222" }}>
-                      {typeof r.estimatedCostEur === "number" ? fmtEur(r.estimatedCostEur) : "-"}
-                    </td>
-                    <td
-                      style={{
-                        padding: "10px 8px",
-                        borderBottom: "1px solid #222",
-                        whiteSpace: "nowrap",
-                      }}
-                    >
-                      {r.reportedAt ?? "-"}
-                    </td>
-                    <td
-                      style={{
-                        padding: "10px 8px",
-                        borderBottom: "1px solid #222",
-                        whiteSpace: "nowrap",
-                      }}
-                    >
-                      {r.lastUpdateUtc ?? "-"}
-                    </td>
-                  </tr>
-                ))}
-
-                {rows.length === 0 && (
-                  <tr>
-                    <td colSpan={11} style={{ padding: 12, opacity: 0.8 }}>
-                      Sem resultados para os filtros atuais.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
+          <div className={styles.hint}>
+            Dica: severidade é string no schema (usa “1”, “2”, … “5”). País usa códigos tipo “PT”.
           </div>
-
-          <p style={{ opacity: 0.7, marginTop: 10 }}>
-            Dica: a severidade é string no schema. Usa “1”, “2”, … “5”. País usa códigos tipo “PT”.
-          </p>
-
-          <details style={{ marginTop: 12, opacity: 0.85 }}>
-            <summary style={{ cursor: "pointer" }}>Ver campos operacionais (debug rápido)</summary>
-            <div style={{ marginTop: 10, display: "grid", gap: 8 }}>
-              {rows.slice(0, 1).map((r) => (
-                <pre
-                  key={r.incidentId}
-                  style={{
-                    padding: 12,
-                    border: "1px solid #333",
-                    borderRadius: 8,
-                    overflowX: "auto",
-                  }}
-                >
-                  {JSON.stringify(
-                    {
-                      source: r.source,
-                      continent: r.continent,
-                      coords:
-                        r.lat != null && r.lon != null
-                          ? `${fmtDec1(r.lat)}, ${fmtDec1(r.lon)}`
-                          : null,
-                      validatedAt: r.validatedAt,
-                      resolvedAt: r.resolvedAt,
-                      assignedUnit: r.assignedUnit,
-                      resourcesCount: r.resourcesCount,
-                      etaMin: r.etaMin,
-                      responseTimeMin: r.responseTimeMin,
-                    },
-                    null,
-                    2
-                  )}
-                </pre>
-              ))}
-            </div>
-          </details>
-        </div>
-      )}
+        </Card>
+      </Section>
     </div>
   );
 }

@@ -8,21 +8,22 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import {
-  Q_AGG_BY_SEVERITY,
-  Q_AGG_BY_TYPE,
-  Q_INCIDENTS_SAMPLE,
-} from "../graphql/queries";
+
+import { Card, PageHeader, Section, StatCard, StatCol, StatGrid } from "../components/ui/Layout";
+import { Alert } from "../components/ui/Alert";
+import { Skeleton } from "../components/ui/Skeleton";
+import { ChartTooltip } from "../components/ui/ChartTooltip";
+import styles from "./dashboard.module.css";
+
+import { Q_AGG_BY_SEVERITY, Q_AGG_BY_TYPE, Q_INCIDENTS_SAMPLE } from "../graphql/queries";
+import { fmtDec, fmtEur, fmtInt } from "../lib/format";
 
 type AggBySeverityRow = {
   severity: string;
   totalIncidents: number;
   avgRiskScore: number | null;
 };
-
-type AggBySeverityData = {
-  aggBySeverity: AggBySeverityRow[];
-};
+type AggBySeverityData = { aggBySeverity: AggBySeverityRow[] };
 
 type AggByTypeRow = {
   incidentType: string;
@@ -30,10 +31,7 @@ type AggByTypeRow = {
   avgRiskScore: number | null;
   totalEstimatedCostEur: number | null;
 };
-
-type AggByTypeData = {
-  aggByType: AggByTypeRow[];
-};
+type AggByTypeData = { aggByType: AggByTypeRow[] };
 
 type IncidentSampleRow = {
   incidentId: string;
@@ -41,15 +39,23 @@ type IncidentSampleRow = {
   estimatedCostEur: number | null;
   riskScore: number | null;
 };
+type IncidentsSampleData = { incidents: IncidentSampleRow[] };
 
-type IncidentsSampleData = {
-  incidents: IncidentSampleRow[];
+/** Tipo mínimo compatível com payload do Recharts Tooltip (evita any). */
+type RechartsPayloadItem = {
+  name?: unknown;
+  value?: unknown;
+  color?: string;
 };
+
+function asTooltipPayload(payload: unknown): readonly RechartsPayloadItem[] | undefined {
+  if (!Array.isArray(payload)) return undefined;
+  return payload as readonly RechartsPayloadItem[];
+}
 
 export default function Dashboard() {
   const severityQuery = useQuery<AggBySeverityData>(Q_AGG_BY_SEVERITY);
   const typeQuery = useQuery<AggByTypeData>(Q_AGG_BY_TYPE);
-
   const sampleQuery = useQuery<IncidentsSampleData>(Q_INCIDENTS_SAMPLE, {
     variables: { limit: 500 },
   });
@@ -61,31 +67,19 @@ export default function Dashboard() {
     severityQuery.data?.aggBySeverity
       ?.slice()
       .sort((a, b) => Number(a.severity) - Number(b.severity))
-      .map((r) => ({
-        severity: r.severity,
-        total: r.totalIncidents,
-        avgRisk: r.avgRiskScore ?? 0,
-      })) ?? [];
+      .map((r) => ({ severity: r.severity, total: r.totalIncidents })) ?? [];
 
   const typeChartData =
     typeQuery.data?.aggByType
       ?.slice()
       .sort((a, b) => b.totalIncidents - a.totalIncidents)
       .slice(0, 10)
-      .map((r) => ({
-        type: r.incidentType,
-        total: r.totalIncidents,
-      })) ?? [];
+      .map((r) => ({ type: r.incidentType, total: r.totalIncidents })) ?? [];
 
   const incidents = sampleQuery.data?.incidents ?? [];
-
   const totalIncidents = incidents.length;
 
-  const totalCostEur = incidents.reduce(
-    (acc, it) => acc + (it.estimatedCostEur ?? 0),
-    0
-  );
-
+  const totalCostEur = incidents.reduce((acc, it) => acc + (it.estimatedCostEur ?? 0), 0);
   const avgCostEur = totalIncidents > 0 ? totalCostEur / totalIncidents : 0;
 
   const riskValues = incidents
@@ -93,103 +87,124 @@ export default function Dashboard() {
     .filter((v): v is number => typeof v === "number");
 
   const avgRisk =
-    riskValues.length > 0
-      ? riskValues.reduce((a, b) => a + b, 0) / riskValues.length
-      : 0;
+    riskValues.length > 0 ? riskValues.reduce((a, b) => a + b, 0) / riskValues.length : 0;
 
-  const countries = new Set(
+  const distinctCountries = new Set(
     incidents.map((it) => it.country).filter((c): c is string => !!c)
-  );
-  const distinctCountries = countries.size;
-
-  const fmtInt = (n: number) => n.toLocaleString("pt-PT");
-  const fmtEur = (n: number) =>
-    n.toLocaleString("pt-PT", { style: "currency", currency: "EUR" });
-  const fmtDec2 = (n: number) =>
-    n.toLocaleString("pt-PT", { maximumFractionDigits: 2 });
+  ).size;
 
   return (
-    <div style={{ padding: 16 }}>
-      <h1>Dashboard</h1>
-
-      {loading && <p>A carregar dados do BI...</p>}
+    <div className={styles.page}>
+      <PageHeader
+        title="Dashboard"
+        subtitle={
+          <>
+            KPIs e agregações do BI. KPIs calculados a partir de <code>incidents(limit=500)</code>.
+          </>
+        }
+      />
 
       {error && (
-        <div>
-          <p style={{ color: "salmon" }}>Erro GraphQL: {error.message}</p>
-        </div>
+        <Alert variant="danger" title="Erro GraphQL">
+          {error.message}
+        </Alert>
       )}
 
-      {!loading && !error && (
-        <div>
-          <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginBottom: 24 }}>
-            <div style={{ padding: 12, border: "1px solid #333", borderRadius: 8, minWidth: 220 }}>
-              <div style={{ opacity: 0.8 }}>Incidentes (amostra)</div>
-              <div style={{ fontSize: 28, fontWeight: 700 }}>{fmtInt(totalIncidents)}</div>
-            </div>
+      <Section>
+        <StatGrid>
+          <StatCol span={3}>
+            <StatCard label="Incidentes (amostra)" value={fmtInt(totalIncidents)} />
+          </StatCol>
 
-            <div style={{ padding: 12, border: "1px solid #333", borderRadius: 8, minWidth: 220 }}>
-              <div style={{ opacity: 0.8 }}>Custo total (EUR)</div>
-              <div style={{ fontSize: 28, fontWeight: 700 }}>{fmtEur(totalCostEur)}</div>
-            </div>
+          <StatCol span={3}>
+            <StatCard label="Custo total (EUR)" value={fmtEur(totalCostEur)} />
+          </StatCol>
 
-            <div style={{ padding: 12, border: "1px solid #333", borderRadius: 8, minWidth: 220 }}>
-              <div style={{ opacity: 0.8 }}>Custo médio (EUR)</div>
-              <div style={{ fontSize: 28, fontWeight: 700 }}>{fmtEur(avgCostEur)}</div>
-            </div>
+          <StatCol span={3}>
+            <StatCard label="Custo médio (EUR)" value={fmtEur(avgCostEur)} />
+          </StatCol>
 
-            <div style={{ padding: 12, border: "1px solid #333", borderRadius: 8, minWidth: 220 }}>
-              <div style={{ opacity: 0.8 }}>Risco médio</div>
-              <div style={{ fontSize: 28, fontWeight: 700 }}>{fmtDec2(avgRisk)}</div>
-            </div>
+          <StatCol span={3}>
+            <StatCard label="Risco médio" value={fmtDec(avgRisk, 2)} />
+          </StatCol>
 
-            <div style={{ padding: 12, border: "1px solid #333", borderRadius: 8, minWidth: 220 }}>
-              <div style={{ opacity: 0.8 }}>Países distintos</div>
-              <div style={{ fontSize: 28, fontWeight: 700 }}>{fmtInt(distinctCountries)}</div>
-            </div>
-          </div>
+          <StatCol span={3}>
+            <StatCard label="Países distintos" value={fmtInt(distinctCountries)} />
+          </StatCol>
+        </StatGrid>
+      </Section>
 
-          <p style={{ opacity: 0.7, marginTop: -8 }}>
-            KPIs calculados a partir de <code>incidents(limit=500)</code>.
-          </p>
+      <Section>
+        <div className={styles.chartsGrid}>
+          <Card
+            title="Incidentes por severidade"
+            subtitle={
+              <>
+                Fonte: <code>aggBySeverity</code>.
+              </>
+            }
+          >
+            {loading ? (
+              <Skeleton className={styles.chartSkeleton} />
+            ) : (
+              <div className={styles.chartBox}>
+                <ResponsiveContainer>
+                  <BarChart data={severityChartData}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis dataKey="severity" />
+                    <YAxis />
+                    <Tooltip
+                      content={(p) => (
+                        <ChartTooltip
+                          active={p.active}
+                          payload={asTooltipPayload(p.payload)}
+                          label={p.label}
+                          title="Severidade"
+                        />
+                      )}
+                    />
+                    <Bar dataKey="total" />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            )}
+          </Card>
 
-          <h2>Incidentes por severidade</h2>
-
-          <div style={{ width: "100%", height: 320 }}>
-            <ResponsiveContainer>
-              <BarChart data={severityChartData}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="severity" />
-                <YAxis />
-                <Tooltip />
-                <Bar dataKey="total" />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-
-          <p style={{ opacity: 0.8 }}>
-            Nota: valores vêm diretamente de <code>aggBySeverity</code> (BI Service).
-          </p>
-
-          <h2 style={{ marginTop: 32 }}>Incidentes por tipo (Top 10)</h2>
-
-          <div style={{ width: "100%", height: 360 }}>
-            <ResponsiveContainer>
-              <BarChart data={typeChartData} layout="vertical" margin={{ left: 40 }}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis type="number" />
-                <YAxis dataKey="type" type="category" width={120} />
-                <Tooltip />
-                <Bar dataKey="total" />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-
-          <p style={{ opacity: 0.8 }}>
-            Nota: valores vêm diretamente de <code>aggByType</code> (BI Service).
-          </p>
+          <Card
+            title="Incidentes por tipo (Top 10)"
+            subtitle={
+              <>
+                Fonte: <code>aggByType</code>.
+              </>
+            }
+          >
+            {loading ? (
+              <Skeleton className={styles.chartSkeletonTall} />
+            ) : (
+              <div className={styles.chartBoxTall}>
+                <ResponsiveContainer>
+                  <BarChart data={typeChartData} layout="vertical" margin={{ left: 16 }}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis type="number" />
+                    <YAxis dataKey="type" type="category" width={140} />
+                    <Tooltip
+                      content={(p) => (
+                        <ChartTooltip
+                          active={p.active}
+                          payload={asTooltipPayload(p.payload)}
+                          label={p.label}
+                          title="Tipo"
+                        />
+                      )}
+                    />
+                    <Bar dataKey="total" />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            )}
+          </Card>
         </div>
-      )}
+      </Section>
     </div>
   );
 }

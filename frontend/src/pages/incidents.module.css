@@ -1,0 +1,36 @@
+.page {
+  display: grid;
+  gap: 14px;
+}
+
+.filters {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.fDoc {
+  width: 140px;
+}
+
+.fLimit {
+  width: 130px;
+}
+
+.actions {
+  display: inline-flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.tableSkeleton {
+  height: 340px;
+}
+
+.hint {
+  margin-top: 10px;
+  font-size: 12px;
+  color: var(--muted);
+}
