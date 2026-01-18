@@ -24,7 +24,7 @@ export function PageHeader({
   title: string;
   subtitle?: ReactNode;
   actions?: ReactNode;
-  children?: ReactNode; // opcional: toolbar / chips / etc. abaixo do topo
+  children?: ReactNode; // opcional: KPIs, toolbar, chips, etc.
 }) {
   return (
     <section className={styles.pageHeader}>
@@ -37,6 +37,30 @@ export function PageHeader({
       </div>
       {children}
     </section>
+  );
+}
+
+export function HeaderKpis({ children }: { children: ReactNode }) {
+  return <div className={styles.headerKpis}>{children}</div>;
+}
+
+export function HeaderKpi({
+  label,
+  value,
+  icon,
+}: {
+  label: ReactNode;
+  value: ReactNode;
+  icon?: ReactNode;
+}) {
+  return (
+    <div className={styles.headerKpi}>
+      {icon && <div className={styles.headerKpiIcon}>{icon}</div>}
+      <div className={styles.headerKpiBody}>
+        <div className={styles.headerKpiLabel}>{label}</div>
+        <div className={styles.headerKpiValue}>{value}</div>
+      </div>
+    </div>
   );
 }
 
@@ -93,17 +117,24 @@ export function StatCard({
   trend,
   trendDirection,
   meta,
+  emphasis,
+  icon,
 }: {
   label: ReactNode;
   value: ReactNode;
   trend?: ReactNode;
   trendDirection?: "up" | "down";
   meta?: ReactNode;
+  emphasis?: boolean;
+  icon?: ReactNode;
 }) {
   return (
-    <div className={styles.statCard}>
+    <div className={cx(styles.statCard, emphasis && styles.statCardEmphasis)}>
       <div className={styles.statTop}>
-        <div className={styles.statLabel}>{label}</div>
+        <div className={styles.statLabelRow}>
+          {icon && <div className={styles.statIcon}>{icon}</div>}
+          <div className={styles.statLabel}>{label}</div>
+        </div>
         {trend && (
           <div
             className={cx(
@@ -116,7 +147,7 @@ export function StatCard({
           </div>
         )}
       </div>
-      <div className={styles.statValue}>{value}</div>
+      <div className={cx(styles.statValue, emphasis && styles.statValueEmphasis)}>{value}</div>
       {meta && <div className={styles.statMeta}>{meta}</div>}
     </div>
   );

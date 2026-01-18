@@ -22,6 +22,8 @@ export function Table<T>({
   compact,
   empty,
   footer,
+  onRowClick,
+  rowAriaLabel,
 }: {
   columns: Array<TableColumn<T>>;
   rows: T[];
@@ -29,7 +31,11 @@ export function Table<T>({
   compact?: boolean;
   empty?: ReactNode;
   footer?: ReactNode;
+  onRowClick?: (row: T, index: number) => void;
+  rowAriaLabel?: (row: T, index: number) => string;
 }) {
+  const clickable = typeof onRowClick === "function";
+
   return (
     <div className={styles.tableWrap}>
       <div className={styles.tableScroll}>
@@ -53,7 +59,24 @@ export function Table<T>({
 
           <tbody>
             {rows.map((r, idx) => (
-              <tr key={rowKey(r, idx)} className={styles.tr}>
+              <tr
+                key={rowKey(r, idx)}
+                className={cx(styles.tr, clickable && styles.trClickable)}
+                onClick={clickable ? () => onRowClick?.(r, idx) : undefined}
+                tabIndex={clickable ? 0 : undefined}
+                role={clickable ? "button" : undefined}
+                aria-label={clickable ? rowAriaLabel?.(r, idx) : undefined}
+                onKeyDown={
+                  clickable
+                    ? (e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          onRowClick?.(r, idx);
+                        }
+                      }
+                    : undefined
+                }
+              >
                 {columns.map((c) => (
                   <td
                     key={c.key}
@@ -86,13 +109,7 @@ export function Table<T>({
   );
 }
 
-export function TablePagination({
-  info,
-  actions,
-}: {
-  info: ReactNode;
-  actions: ReactNode;
-}) {
+export function TablePagination({ info, actions }: { info: ReactNode; actions: ReactNode }) {
   return (
     <div className={styles.pagination}>
       <div className={styles.paginationInfo}>{info}</div>

@@ -1,21 +1,40 @@
 import { useQuery } from "@apollo/client/react";
+import { useNavigate } from "react-router-dom";
 import {
   Bar,
   BarChart,
   CartesianGrid,
+  Cell,
   ResponsiveContainer,
   Tooltip,
   XAxis,
   YAxis,
 } from "recharts";
 
-import { Card, PageHeader, Section, StatCard, StatCol, StatGrid } from "../components/ui/Layout";
+import {
+  Card,
+  PageHeader,
+  Section,
+  StatCard,
+  StatCol,
+  StatGrid,
+} from "../components/ui/Layout";
 import { Alert } from "../components/ui/Alert";
 import { Skeleton } from "../components/ui/Skeleton";
 import { ChartTooltip } from "../components/ui/ChartTooltip";
+import {
+  IconEuro,
+  IconGauge,
+  IconGlobe,
+  IconIncidents,
+} from "../components/ui/Icons";
 import styles from "./dashboard.module.css";
 
-import { Q_AGG_BY_SEVERITY, Q_AGG_BY_TYPE, Q_INCIDENTS_SAMPLE } from "../graphql/queries";
+import {
+  Q_AGG_BY_SEVERITY,
+  Q_AGG_BY_TYPE,
+  Q_INCIDENTS_SAMPLE,
+} from "../graphql/queries";
 import { fmtDec, fmtEur, fmtInt } from "../lib/format";
 
 type AggBySeverityRow = {
@@ -53,11 +72,39 @@ function asTooltipPayload(payload: unknown): readonly RechartsPayloadItem[] | un
   return payload as readonly RechartsPayloadItem[];
 }
 
+function severityFill(sev: string | null | undefined): string {
+  const n = Number(sev);
+  if (!Number.isFinite(n)) return "var(--chart-1)";
+  if (n <= 2) return "var(--danger)";
+  if (n === 3) return "var(--warning)";
+  if (n === 4) return "var(--info)";
+  return "var(--success)";
+}
+
+function asClickPayload(p: unknown): { severity?: string; type?: string } {
+  if (!p || typeof p !== "object") return {};
+  const rec = p as Record<string, unknown>;
+  const payload = rec.payload;
+  if (!payload || typeof payload !== "object") return {};
+  const d = payload as Record<string, unknown>;
+  return {
+    severity: typeof d.severity === "string" ? d.severity : undefined,
+    type: typeof d.type === "string" ? d.type : undefined,
+  };
+}
+
 export default function Dashboard() {
-  const severityQuery = useQuery<AggBySeverityData>(Q_AGG_BY_SEVERITY);
-  const typeQuery = useQuery<AggByTypeData>(Q_AGG_BY_TYPE);
+  const navigate = useNavigate();
+
+  const severityQuery = useQuery<AggBySeverityData>(Q_AGG_BY_SEVERITY, {
+    fetchPolicy: "cache-and-network",
+  });
+  const typeQuery = useQuery<AggByTypeData>(Q_AGG_BY_TYPE, {
+    fetchPolicy: "cache-and-network",
+  });
   const sampleQuery = useQuery<IncidentsSampleData>(Q_INCIDENTS_SAMPLE, {
     variables: { limit: 500 },
+    fetchPolicy: "cache-and-network",
   });
 
   const loading = severityQuery.loading || typeQuery.loading || sampleQuery.loading;
@@ -99,7 +146,8 @@ export default function Dashboard() {
         title="Dashboard"
         subtitle={
           <>
-            KPIs e agregações do BI. KPIs calculados a partir de <code>incidents(limit=500)</code>.
+            KPIs e agregações do BI. KPIs calculados a partir de{" "}
+            <code>incidents(limit=500)</code>.
           </>
         }
       />
@@ -112,24 +160,34 @@ export default function Dashboard() {
 
       <Section>
         <StatGrid>
-          <StatCol span={3}>
-            <StatCard label="Incidentes (amostra)" value={fmtInt(totalIncidents)} />
+          <StatCol span={6}>
+            <StatCard
+              label="Incidentes (amostra)"
+              value={fmtInt(totalIncidents)}
+              emphasis
+              icon={<IconIncidents />}
+            />
           </StatCol>
 
-          <StatCol span={3}>
-            <StatCard label="Custo total (EUR)" value={fmtEur(totalCostEur)} />
+          <StatCol span={6}>
+            <StatCard
+              label="Custo total (EUR)"
+              value={fmtEur(totalCostEur)}
+              emphasis
+              icon={<IconEuro />}
+            />
           </StatCol>
 
-          <StatCol span={3}>
-            <StatCard label="Custo médio (EUR)" value={fmtEur(avgCostEur)} />
+          <StatCol span={4}>
+            <StatCard label="Custo médio (EUR)" value={fmtEur(avgCostEur)} icon={<IconEuro />} />
           </StatCol>
 
-          <StatCol span={3}>
-            <StatCard label="Risco médio" value={fmtDec(avgRisk, 2)} />
+          <StatCol span={4}>
+            <StatCard label="Risco médio" value={fmtDec(avgRisk, 2)} icon={<IconGauge />} />
           </StatCol>
 
-          <StatCol span={3}>
-            <StatCard label="Países distintos" value={fmtInt(distinctCountries)} />
+          <StatCol span={4}>
+            <StatCard label="Países distintos" value={fmtInt(distinctCountries)} icon={<IconGlobe />} />
           </StatCol>
         </StatGrid>
       </Section>
@@ -140,7 +198,7 @@ export default function Dashboard() {
             title="Incidentes por severidade"
             subtitle={
               <>
-                Fonte: <code>aggBySeverity</code>.
+                Fonte: <code>aggBySeverity</code>. Clica numa barra para abrir Incidentes filtrado por severidade.
               </>
             }
           >
@@ -150,9 +208,13 @@ export default function Dashboard() {
               <div className={styles.chartBox}>
                 <ResponsiveContainer>
                   <BarChart data={severityChartData}>
-                    <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis dataKey="severity" />
-                    <YAxis />
+                    <CartesianGrid
+                      stroke="var(--chart-grid)"
+                      strokeDasharray="4 4"
+                      vertical={false}
+                    />
+                    <XAxis dataKey="severity" axisLine={false} tickLine={false} />
+                    <YAxis axisLine={false} tickLine={false} />
                     <Tooltip
                       content={(p) => (
                         <ChartTooltip
@@ -163,7 +225,20 @@ export default function Dashboard() {
                         />
                       )}
                     />
-                    <Bar dataKey="total" />
+                    <Bar
+                      dataKey="total"
+                      radius={[6, 6, 0, 0]}
+                      cursor="pointer"
+                      onClick={(p) => {
+                        const d = asClickPayload(p);
+                        if (!d.severity) return;
+                        navigate(`/incidents?severity=${encodeURIComponent(d.severity)}`);
+                      }}
+                    >
+                      {severityChartData.map((r, idx) => (
+                        <Cell key={`${r.severity}:${idx}`} fill={severityFill(r.severity)} />
+                      ))}
+                    </Bar>
                   </BarChart>
                 </ResponsiveContainer>
               </div>
@@ -174,7 +249,7 @@ export default function Dashboard() {
             title="Incidentes por tipo (Top 10)"
             subtitle={
               <>
-                Fonte: <code>aggByType</code>.
+                Fonte: <code>aggByType</code>. Clica numa barra para abrir Incidentes filtrado por tipo.
               </>
             }
           >
@@ -184,9 +259,19 @@ export default function Dashboard() {
               <div className={styles.chartBoxTall}>
                 <ResponsiveContainer>
                   <BarChart data={typeChartData} layout="vertical" margin={{ left: 16 }}>
-                    <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis type="number" />
-                    <YAxis dataKey="type" type="category" width={140} />
+                    <CartesianGrid
+                      stroke="var(--chart-grid)"
+                      strokeDasharray="4 4"
+                      horizontal={false}
+                    />
+                    <XAxis type="number" axisLine={false} tickLine={false} />
+                    <YAxis
+                      dataKey="type"
+                      type="category"
+                      width={140}
+                      axisLine={false}
+                      tickLine={false}
+                    />
                     <Tooltip
                       content={(p) => (
                         <ChartTooltip
@@ -197,7 +282,17 @@ export default function Dashboard() {
                         />
                       )}
                     />
-                    <Bar dataKey="total" />
+                    <Bar
+                      dataKey="total"
+                      radius={[0, 6, 6, 0]}
+                      fill="var(--chart-1)"
+                      cursor="pointer"
+                      onClick={(p) => {
+                        const d = asClickPayload(p);
+                        if (!d.type) return;
+                        navigate(`/incidents?type=${encodeURIComponent(d.type)}`);
+                      }}
+                    />
                   </BarChart>
                 </ResponsiveContainer>
               </div>

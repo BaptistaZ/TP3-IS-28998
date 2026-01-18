@@ -11,3 +11,6 @@ export * from "./Skeleton";
 export * from "./EmptyState";
 export * from "./CopyButton";
 export * from "./ChartTooltip";
+export * from "./Icons";
+export * from "./ColumnPicker";
+export * from "./FilterSummary";

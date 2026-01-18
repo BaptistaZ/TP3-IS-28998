@@ -70,9 +70,11 @@ export const Q_INCIDENTS = gql`
       responseTimeMin
       estimatedCostEur
       riskScore
+      notes
     }
   }
 `;
+
 
 export const Q_DOCS = gql`
   query Docs($limit: Int) {
