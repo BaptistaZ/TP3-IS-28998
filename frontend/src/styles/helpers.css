@@ -1,18 +1,94 @@
-.u-row { display:flex; gap:12px; align-items:center; }
-.u-row-wrap { display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
-.u-stack { display:grid; gap:12px; }
-.u-spread { display:flex; align-items:center; justify-content:space-between; gap:12px; }
+/* =============================================================================
+ * Layout utilities (flex/grid helpers)
+ * =============================================================================
+ * Quick composition classes for common layout patterns.
+ */
 
-.u-mono { font-family: var(--mono); }
-.u-muted { color: var(--muted); }
-.u-muted-2 { color: var(--muted-2); }
-
-.u-truncate { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.u-scrollX { overflow-x:auto; }
-
-.u-srOnly {
-  position:absolute; width:1px; height:1px; padding:0; margin:-1px;
-  overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0;
+.u-row {
+  display: flex;
+  gap: 12px;
+  align-items: center;
 }
 
-.u-divider { height:1px; background: var(--border); }
+.u-row-wrap {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.u-stack {
+  display: grid;
+  gap: 12px;
+}
+
+.u-spread {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+/* =============================================================================
+ * Typography utilities
+ * =============================================================================
+ * Lightweight text helpers that rely on design tokens (CSS variables).
+ */
+
+.u-mono {
+  font-family: var(--mono);
+}
+
+.u-muted {
+  color: var(--muted);
+}
+
+.u-muted-2 {
+  color: var(--muted-2);
+}
+
+/* =============================================================================
+ * Overflow / scrolling utilities
+ * =============================================================================
+ * Common patterns for truncation and horizontal scroll containers.
+ */
+
+.u-truncate {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.u-scrollX {
+  overflow-x: auto;
+}
+
+/* =============================================================================
+ * Accessibility utility
+ * =============================================================================
+ * Screen-reader only: visible to assistive tech, hidden visually.
+ */
+
+.u-srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* =============================================================================
+ * Divider utility
+ * =============================================================================
+ * Simple 1px separator using the theme border token.
+ */
+
+.u-divider {
+  height: 1px;
+  background: var(--border);
+}

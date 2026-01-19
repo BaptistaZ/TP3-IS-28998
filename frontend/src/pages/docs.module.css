@@ -1,22 +1,46 @@
+/* =============================================================================
+ * Docs page layout
+ * =============================================================================
+ * Página "Documentos": grelha simples com espaçamento consistente entre blocos.
+ */
+
 .page {
   display: grid;
-  gap: 14px;
+  gap: 14px; /* distância vertical entre header, toolbar, tabela, alerts */
 }
+
+/* =============================================================================
+ * Toolbar (lado esquerdo)
+ * =============================================================================
+ * Agrupa controlos (limit + meta) alinhados pela base para inputs ficarem alinhados.
+ */
 
 .toolbarLeft {
   display: flex;
-  align-items: flex-end;
+  align-items: flex-end; /* alinha Input + meta box pela base */
   gap: 12px;
-  flex-wrap: wrap;
+  flex-wrap: wrap; /* evita overflow em ecrãs pequenos */
 }
+
+/* =============================================================================
+ * Limit input sizing
+ * =============================================================================
+ * Mantém largura estável para o campo "Limit" (não encolhe com conteúdo).
+ */
 
 .limitBox {
   width: 160px;
 }
 
+/* =============================================================================
+ * Results meta pill
+ * =============================================================================
+ * Pequeno “badge/pill” com informação do nº de linhas recebidas.
+ */
+
 .resultsMeta {
   display: inline-flex;
-  align-items: baseline;
+  align-items: baseline; /* label pequeno + valor maior alinhados visualmente */
   gap: 8px;
   padding: 8px 10px;
   border-radius: 10px;
@@ -24,16 +48,24 @@
   background: var(--surface);
 }
 
+/* Texto "Linhas" (mais discreto) */
 .resultsLabel {
   font-size: 12px;
   color: var(--muted);
   font-weight: 650;
 }
 
+/* Número de linhas (mais destacado) */
 .resultsValue {
   font-size: 13px;
   font-weight: 800;
 }
+
+/* =============================================================================
+ * Loading skeleton sizing
+ * =============================================================================
+ * Altura fixa para reduzir layout shift enquanto a query devolve dados.
+ */
 
 .tableSkeleton {
   height: 280px;

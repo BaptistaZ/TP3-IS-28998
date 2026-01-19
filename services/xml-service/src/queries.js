@@ -1,43 +1,89 @@
 import pg from "pg";
+
 const { Pool } = pg;
-
-let pool;
-
-function getPool() {
-  if (!pool) {
-    pool = new Pool({
-      host: process.env.DB_HOST,
-      port: Number(process.env.DB_PORT || 5432),
-      database: process.env.DB_NAME,
-      user: process.env.DB_USER,
-      password: process.env.DB_PASSWORD,
-    });
-  }
-  return pool;
-}
 
 const TABLE = process.env.DB_TABLE || "tp3_incidents_xml";
 
+let pool; // Cached Pool instance (singleton per process)
+
+/**
+ * Get (or create) a cached pg.Pool instance.
+ *
+ * Lazy initialization avoids DB work at import time and keeps startup predictable.
+ *
+ * @returns {pg.Pool}
+ */
+function getPool() {
+  if (pool) return pool;
+
+  pool = new Pool({
+    host: process.env.DB_HOST,
+    port: Number(process.env.DB_PORT || 5432),
+    database: process.env.DB_NAME,
+    user: process.env.DB_USER,
+    password: process.env.DB_PASSWORD,
+  });
+
+  return pool;
+}
+
+/**
+ * Normalize optional string filters.
+ *
+ * @param {any} value
+ * @returns {string|null} Trimmed string, or null if empty.
+ */
+function cleanStr(value) {
+  const s = String(value ?? "").trim();
+  return s ? s : null;
+}
+
+/**
+ * List persisted XML documents (metadata only).
+ *
+ * @param {number} [limit=10]
+ * @returns {Promise<Array<{id:number, mapper_version:string, data_criacao:string}>>}
+ */
 export async function listDocs(limit = 10) {
   const p = getPool();
+
   const q = `
     SELECT id, mapper_version, data_criacao
     FROM ${TABLE}
     ORDER BY id DESC
     LIMIT $1;
   `;
+
   const r = await p.query(q, [limit]);
   return r.rows;
 }
 
-function cleanStr(v) {
-  const s = String(v ?? "").trim();
-  return s ? s : null;
-}
-
 /**
- * Query incidents by optional filters
- * Reads from XML stored in Postgres using xmltable()
+ * Query incidents from the XML document using optional filters.
+ *
+ * Default behavior:
+ * - If docId is not provided, this reads from the most recent document (MAX(id)).
+ *
+ * Supported filters (all optional):
+ * - docId: document id
+ * - type: incident type
+ * - severity: severity
+ * - status: status
+ * - country: country
+ *
+ * Paging:
+ * - limit (default 50)
+ * - offset (default 0)
+ *
+ * @param {Object} params
+ * @param {number|string|null} [params.docId]
+ * @param {string|null} [params.type]
+ * @param {string|null} [params.severity]
+ * @param {string|null} [params.status]
+ * @param {string|null} [params.country]
+ * @param {number} [params.limit=50]
+ * @param {number} [params.offset=0]
+ * @returns {Promise<Array<Object>>} Rows projected from the XML via xmltable()
  */
 export async function queryIncidents({
   docId,
@@ -51,8 +97,10 @@ export async function queryIncidents({
   const p = getPool();
 
   const params = [];
-  // Base filter to avoid empty / broken rows
-  const where = ["NULLIF(x.incident_id, '') IS NOT NULL"];
+  const where = [
+    // Base filter to avoid empty/broken rows.
+    "NULLIF(x.incident_id, '') IS NOT NULL",
+  ];
 
   const docIdNum =
     docId != null && Number.isFinite(Number(docId))
@@ -64,15 +112,14 @@ export async function queryIncidents({
   const statusS = cleanStr(status);
   const countryS = cleanStr(country);
 
-  // Se não vier docId, por defeito só lê o documento mais recente.
+  // Default to the most recent document if docId is not specified.
   if (docIdNum == null) {
     where.push(`d.id = (SELECT MAX(id) FROM ${TABLE})`);
-  }
-
-  if (docIdNum != null) {
+  } else {
     params.push(docIdNum);
     where.push(`d.id = $${params.length}`);
   }
+
   if (typeS) {
     params.push(typeS);
     where.push(`x.incident_type = $${params.length}`);
@@ -94,6 +141,8 @@ export async function queryIncidents({
   const off = Number.isFinite(Number(offset))
     ? Math.max(0, Math.trunc(Number(offset)))
     : 0;
+
+  // Append paging parameters last.
   params.push(lim);
   params.push(off);
 
@@ -172,7 +221,14 @@ export async function queryIncidents({
 }
 
 /**
- * Aggregation by incident type
+ * Aggregate incidents by incident type for the most recent document.
+ *
+ * Metrics:
+ * - total_incidents
+ * - avg_risk_score
+ * - total_estimated_cost_eur
+ *
+ * @returns {Promise<Array<Object>>}
  */
 export async function aggByType() {
   const p = getPool();
@@ -203,7 +259,13 @@ export async function aggByType() {
 }
 
 /**
- * Aggregation by severity
+ * Aggregate incidents by severity for the most recent document.
+ *
+ * Metrics:
+ * - total_incidents
+ * - avg_risk_score
+ *
+ * @returns {Promise<Array<Object>>}
  */
 export async function aggBySeverity() {
   const p = getPool();

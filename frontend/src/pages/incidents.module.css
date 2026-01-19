@@ -1,33 +1,66 @@
+/* =============================================================================
+ * Incidents page layout
+ * =============================================================================
+ * Página "Incidentes": grelha simples com espaçamento consistente entre secções.
+ */
+
 .page {
   display: grid;
-  gap: 14px;
+  gap: 14px; /* separação vertical entre header, filtros, tabela, etc. */
 }
+
+/* =============================================================================
+ * Filters row
+ * =============================================================================
+ * Linha de filtros: inputs lado a lado, alinhados pela base; quebra em múltiplas
+ * linhas quando não há espaço.
+ */
 
 .filters {
   display: flex;
-  align-items: flex-end;
+  align-items: flex-end; /* alinha visualmente labels/inputs */
   gap: 10px;
-  flex-wrap: wrap;
-  min-width: 0;
+  flex-wrap: wrap; /* evita overflow horizontal em ecrãs pequenos */
+  min-width: 0; /* permite que o container encolha sem forçar overflow */
 }
 
+/* DocId: largura controlada para não “dançar” com conteúdo */
 .fDoc {
   width: 140px;
 }
 
+/* Limit: largura controlada para manter consistência com o DocId */
 .fLimit {
   width: 130px;
 }
 
+/* =============================================================================
+ * Action buttons (Aplicar / Limpar)
+ * =============================================================================
+ * Agrupa botões do lado direito da toolbar com spacing consistente.
+ */
+
 .actions {
   display: inline-flex;
   gap: 10px;
-  align-items: center;
+  align-items: center; /* centra verticalmente os botões */
 }
+
+/* =============================================================================
+ * Loading skeleton sizing
+ * =============================================================================
+ * Altura fixa para reduzir layout shift durante carregamento.
+ */
 
 .tableSkeleton {
   height: 340px;
 }
+
+/* =============================================================================
+ * Hint / helper text
+ * =============================================================================
+ * Texto auxiliar no fundo do card (ex.: dica sobre severidade/country).
+ */
 
 .hint {
   margin-top: 10px;

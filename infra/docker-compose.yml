@@ -1,6 +1,9 @@
 name: tp3-is-28998
 
 services:
+  # ---------------------------------------------------------------------------
+  # Database: PostgreSQL with init scripts
+  # ---------------------------------------------------------------------------
   postgres:
     image: postgres:16
     container_name: postgres
@@ -11,7 +14,9 @@ services:
     ports:
       - "5432:5432"
     volumes:
+      # Persistent data
       - tp3_pgdata:/var/lib/postgresql/data
+      # SQL init scripts executed on first startup
       - ./init:/docker-entrypoint-initdb.d
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U tp3_28998 -d tp3_is"]
@@ -19,6 +24,9 @@ services:
       timeout: 5s
       retries: 10
 
+  # ---------------------------------------------------------------------------
+  # XML Service: ingest + XML generation/validation + DB persistence + REST queries
+  # ---------------------------------------------------------------------------
   xml-service:
     build:
       context: ..
@@ -32,8 +40,12 @@ services:
     ports:
       - "7001:7001"
     volumes:
+      # Optional: persisted XML debug outputs (enabled/disabled via env flags)
       - ../services/xml-service/generated-xml:/app/generated-xml
 
+  # ---------------------------------------------------------------------------
+  # gRPC Service: gRPC interface backed by the same Postgres XML store
+  # ---------------------------------------------------------------------------
   grpc-service:
     build:
       context: ..
@@ -47,6 +59,9 @@ services:
     ports:
       - "50051:50051"
 
+  # ---------------------------------------------------------------------------
+  # XML-RPC Service (Java): provides FX rate used during enrichment (EUR->USD)
+  # ---------------------------------------------------------------------------
   rpc-service:
     build:
       context: ../services/rpc-service-java
@@ -57,6 +72,9 @@ services:
     ports:
       - "9000:9000"
 
+  # ---------------------------------------------------------------------------
+  # Processor: async worker that polls Supabase S3 and drives ingest + webhook flow
+  # ---------------------------------------------------------------------------
   processor:
     build:
       context: ..
@@ -75,9 +93,14 @@ services:
       webhook:
         condition: service_started
     volumes:
+      # Shared volume with webhook to persist state, temp files, and mapped CSV artifacts
       - processor_tmp:/app/tmp
+      # Mapper definition passed into the container as read-only
       - ../services/processor/mapper.json:/app/mapper.json:ro
 
+  # ---------------------------------------------------------------------------
+  # Webhook receiver: receives xml-service callbacks (OK / validation / persistence errors)
+  # ---------------------------------------------------------------------------
   webhook:
     build:
       context: ..
@@ -89,8 +112,12 @@ services:
     ports:
       - "8000:8000"
     volumes:
+      # Share processor state and artifacts with the processor service
       - processor_tmp:/app/tmp
 
+  # ---------------------------------------------------------------------------
+  # Crawler: produces CSV inputs by uploading to Supabase S3 (incoming/)
+  # ---------------------------------------------------------------------------
   crawler:
     build:
       context: ..
@@ -102,8 +129,12 @@ services:
       processor:
         condition: service_started
     volumes:
+      # Local datasets are mounted for sample CSV generation / selection
       - ../datasets:/app/datasets
 
+  # ---------------------------------------------------------------------------
+  # BI Service: GraphQL API used by the frontend; calls xml-service (REST) + grpc-service (gRPC)
+  # ---------------------------------------------------------------------------
   bi-service:
     build:
       context: ..
@@ -117,6 +148,9 @@ services:
     ports:
       - "4000:4000"
 
+  # ---------------------------------------------------------------------------
+  # Frontend: static UI served by Nginx, consuming the BI GraphQL API
+  # ---------------------------------------------------------------------------
   frontend:
     build:
       context: ../frontend
@@ -128,7 +162,9 @@ services:
       - bi-service
     restart: unless-stopped
 
-
+# -----------------------------------------------------------------------------
+# Named volumes
+# -----------------------------------------------------------------------------
 volumes:
   tp3_pgdata:
   processor_tmp:

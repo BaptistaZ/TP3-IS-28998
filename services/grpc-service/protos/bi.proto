@@ -5,19 +5,27 @@ package bi;
 service BIService {
   rpc ListDocs (ListDocsRequest) returns (ListDocsResponse);
 
-  // Incidents (new model)
+  // Incident queries (latest document snapshot)
   rpc QueryIncidents (QueryIncidentsRequest) returns (QueryIncidentsResponse);
+
+  // Aggregations (latest document snapshot)
   rpc AggByType (AggByTypeRequest) returns (AggByTypeResponse);
   rpc AggBySeverity (AggBySeverityRequest) returns (AggBySeverityResponse);
 }
 
 message ListDocsRequest {
+  // Maximum number of documents to return (ordered by id DESC).
   int32 limit = 1;
 }
 
 message Doc {
+  // Database document id.
   int32 id = 1;
+
+  // Mapper version used to generate the XML payload.
   string mapper_version = 2;
+
+  // Creation timestamp (ISO-8601 string, e.g. 2026-01-19T10:28:15Z).
   string created_at = 3;
 }
 
@@ -25,43 +33,59 @@ message ListDocsResponse {
   repeated Doc docs = 1;
 }
 
-// ------------------------
-// QueryIncidents
-// ------------------------
 message QueryIncidentsRequest {
+  // Optional filters. Empty string means "no filter".
   string type = 1;
   string severity = 2;
   string status = 3;
   string country = 4;
+
+  // Maximum number of incidents to return.
   int32 limit = 5;
 }
 
 message Incident {
+  // Database document id from which this incident was extracted.
   int32 doc_id = 1;
+
+  // Business identifier from the CSV/XML (attribute IncidentId).
   string incident_id = 2;
+
+  // Source of the incident report (e.g. citizen/sensor/authority/media).
   string source = 3;
+
+  // Incident category/type (e.g. fire/flood/medical/...).
   string incident_type = 4;
+
+  // Severity level as a string (kept as string for parity with XML attributes).
   string severity = 5;
+
+  // Workflow status (reported/validated/in_progress/resolved/cancelled).
   string status = 6;
 
+  // Location metadata.
   string city = 7;
   string country = 8;
   string continent = 9;
 
+  // Coordinates and accuracy (0 if missing).
   double lat = 10;
   double lon = 11;
   double accuracy_m = 12;
 
+  // Timeline fields (ISO-8601 strings; empty if missing).
   string reported_at = 13;
   string validated_at = 14;
   string resolved_at = 15;
   string last_update_utc = 16;
 
+  // Response information.
   string assigned_unit = 17;
   double resources_count = 18;
   double eta_min = 19;
   double response_time_min = 20;
 
+  // Derived metrics.
   double estimated_cost_eur = 21;
   double risk_score = 22;
 }
@@ -70,15 +94,19 @@ message QueryIncidentsResponse {
   repeated Incident incidents = 1;
 }
 
-// ------------------------
-// AggByType
-// ------------------------
 message AggByTypeRequest {}
 
 message AggByTypeRow {
+  // Incident type.
   string incident_type = 1;
+
+  // Number of incidents for this type.
   int32 total_incidents = 2;
+
+  // Average risk score across incidents.
   double avg_risk_score = 3;
+
+  // Sum of estimated costs in EUR.
   double total_estimated_cost_eur = 4;
 }
 
@@ -86,17 +114,18 @@ message AggByTypeResponse {
   repeated AggByTypeRow rows = 1;
 }
 
-// ------------------------
-// AggBySeverity
-// ------------------------
 message AggBySeverityRequest {}
 
 message AggBySeverityRow {
+  // Severity level.
   string severity = 1;
+
+  // Number of incidents for this severity.
   int32 total_incidents = 2;
+
+  // Average risk score across incidents.
   double avg_risk_score = 3;
 }
 
 message AggBySeverityResponse {
   repeated AggBySeverityRow rows = 1;
-}

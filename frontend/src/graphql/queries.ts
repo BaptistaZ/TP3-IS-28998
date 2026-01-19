@@ -1,5 +1,13 @@
 import { gql } from "@apollo/client";
 
+// =============================================================================
+// Aggregations (Dashboard KPIs / charts)
+// =============================================================================
+
+/**
+ * Aggregate incidents by severity.
+ * Used for severity distribution charts and risk overview widgets.
+ */
 export const Q_AGG_BY_SEVERITY = gql`
   query AggBySeverity {
     aggBySeverity {
@@ -10,6 +18,10 @@ export const Q_AGG_BY_SEVERITY = gql`
   }
 `;
 
+/**
+ * Aggregate incidents by incident type.
+ * Used for "by type" charts and estimated cost breakdowns.
+ */
 export const Q_AGG_BY_TYPE = gql`
   query AggByType {
     aggByType {
@@ -21,6 +33,14 @@ export const Q_AGG_BY_TYPE = gql`
   }
 `;
 
+// =============================================================================
+// Incidents (lists / tables / maps)
+// =============================================================================
+
+/**
+ * Lightweight incidents query for sampling (e.g., dashboard cards, quick previews).
+ * Keeps payload small by selecting only the fields needed by summary widgets.
+ */
 export const Q_INCIDENTS_SAMPLE = gql`
   query IncidentsSample($limit: Int) {
     incidents(limit: $limit) {
@@ -32,6 +52,11 @@ export const Q_INCIDENTS_SAMPLE = gql`
   }
 `;
 
+/**
+ * Full incidents query with optional filters + pagination.
+ * Used by the main incidents page (table + filters) and any map view requiring
+ * location/time/status fields.
+ */
 export const Q_INCIDENTS = gql`
   query Incidents(
     $docId: Int
@@ -77,6 +102,14 @@ export const Q_INCIDENTS = gql`
   }
 `;
 
+// =============================================================================
+// Documents (stored XML documents metadata)
+// =============================================================================
+
+/**
+ * List stored XML documents (latest first).
+ * Used by the Docs page to show ingestion history and available datasets.
+ */
 export const Q_DOCS = gql`
   query Docs($limit: Int) {
     docs(limit: $limit) {

@@ -1,8 +1,14 @@
 package com.tp3.rpc;
 
 public class FxHandler {
-  // O Processor chama: client.get_eur_usd_rate()
+
+  /**
+   * Return the EUR->USD exchange rate.
+   *
+   * @return fixed FX rate as double.
+   */
   public double get_eur_usd_rate() {
-    return 1.10; // fixo; suficiente para cumprir protocolo XML-RPC
+    // Fixed value is sufficient for the pipeline enrichment and for protocol validation.
+    return 1.10;
   }
 }

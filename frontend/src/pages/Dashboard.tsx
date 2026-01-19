@@ -11,6 +11,8 @@ import {
   YAxis,
 } from "recharts";
 
+import { Alert } from "../components/ui/Alert";
+import { ChartTooltip } from "../components/ui/ChartTooltip";
 import {
   Card,
   PageHeader,
@@ -19,9 +21,7 @@ import {
   StatCol,
   StatGrid,
 } from "../components/ui/Layout";
-import { Alert } from "../components/ui/Alert";
 import { Skeleton } from "../components/ui/Skeleton";
-import { ChartTooltip } from "../components/ui/ChartTooltip";
 import {
   IconEuro,
   IconGauge,
@@ -36,6 +36,10 @@ import {
   Q_INCIDENTS_SAMPLE,
 } from "../graphql/queries";
 import { fmtDec, fmtEur, fmtInt } from "../lib/format";
+
+// =============================================================================
+// GraphQL types (local to this page)
+// =============================================================================
 
 type AggBySeverityRow = {
   severity: string;
@@ -60,18 +64,33 @@ type IncidentSampleRow = {
 };
 type IncidentsSampleData = { incidents: IncidentSampleRow[] };
 
-/** Tipo mínimo compatível com payload do Recharts Tooltip (evita any). */
+// =============================================================================
+// Recharts interop helpers
+// =============================================================================
+
+/**
+ * Minimal payload shape used by our custom ChartTooltip component.
+ * This keeps the code "any"-free while remaining compatible with Recharts.
+ */
 type RechartsPayloadItem = {
   name?: unknown;
   value?: unknown;
   color?: string;
 };
 
+/**
+ * Defensive conversion of the Recharts tooltip payload into a typed array.
+ * If Recharts provides something unexpected, return undefined to avoid crashes.
+ */
 function asTooltipPayload(payload: unknown): readonly RechartsPayloadItem[] | undefined {
   if (!Array.isArray(payload)) return undefined;
   return payload as readonly RechartsPayloadItem[];
 }
 
+/**
+ * Choose a bar color based on severity value (1..5).
+ * Uses CSS variables to remain consistent with the design system.
+ */
 function severityFill(sev: string | null | undefined): string {
   const n = Number(sev);
   if (!Number.isFinite(n)) return "var(--chart-1)";
@@ -81,6 +100,10 @@ function severityFill(sev: string | null | undefined): string {
   return "var(--success)";
 }
 
+/**
+ * Extracts navigation filters from Recharts click event objects.
+ * Recharts passes a complex event shape; we only care about the underlying datum.
+ */
 function asClickPayload(p: unknown): { severity?: string; type?: string } {
   if (!p || typeof p !== "object") return {};
   const rec = p as Record<string, unknown>;
@@ -93,9 +116,14 @@ function asClickPayload(p: unknown): { severity?: string; type?: string } {
   };
 }
 
+// =============================================================================
+// Page
+// =============================================================================
+
 export default function Dashboard() {
   const navigate = useNavigate();
 
+  // Run the page queries in parallel (Apollo will dedupe/cache where applicable).
   const severityQuery = useQuery<AggBySeverityData>(Q_AGG_BY_SEVERITY, {
     fetchPolicy: "cache-and-network",
   });
@@ -107,15 +135,27 @@ export default function Dashboard() {
     fetchPolicy: "cache-and-network",
   });
 
+  // Single loading/error state for the whole page.
   const loading = severityQuery.loading || typeQuery.loading || sampleQuery.loading;
   const error = severityQuery.error || typeQuery.error || sampleQuery.error;
 
+  // -----------------------------
+  // Chart data shaping
+  // -----------------------------
+
+  /**
+   * Severity chart: keep natural order (1..5).
+   * We only need `severity` and `total` for the BarChart.
+   */
   const severityChartData =
     severityQuery.data?.aggBySeverity
       ?.slice()
       .sort((a, b) => Number(a.severity) - Number(b.severity))
       .map((r) => ({ severity: r.severity, total: r.totalIncidents })) ?? [];
 
+  /**
+   * Type chart: keep top 10 types by incident count (descending).
+   */
   const typeChartData =
     typeQuery.data?.aggByType
       ?.slice()
@@ -123,12 +163,17 @@ export default function Dashboard() {
       .slice(0, 10)
       .map((r) => ({ type: r.incidentType, total: r.totalIncidents })) ?? [];
 
+  // -----------------------------
+  // KPI calculations (sample-based)
+  // -----------------------------
+
   const incidents = sampleQuery.data?.incidents ?? [];
   const totalIncidents = incidents.length;
 
   const totalCostEur = incidents.reduce((acc, it) => acc + (it.estimatedCostEur ?? 0), 0);
   const avgCostEur = totalIncidents > 0 ? totalCostEur / totalIncidents : 0;
 
+  // Filter out nulls so the average is computed only on valid values.
   const riskValues = incidents
     .map((it) => it.riskScore)
     .filter((v): v is number => typeof v === "number");
@@ -139,6 +184,10 @@ export default function Dashboard() {
   const distinctCountries = new Set(
     incidents.map((it) => it.country).filter((c): c is string => !!c)
   ).size;
+
+  // -----------------------------
+  // Render
+  // -----------------------------
 
   return (
     <div className={styles.page}>
@@ -187,7 +236,11 @@ export default function Dashboard() {
           </StatCol>
 
           <StatCol span={4}>
-            <StatCard label="Países distintos" value={fmtInt(distinctCountries)} icon={<IconGlobe />} />
+            <StatCard
+              label="Países distintos"
+              value={fmtInt(distinctCountries)}
+              icon={<IconGlobe />}
+            />
           </StatCol>
         </StatGrid>
       </Section>
@@ -198,7 +251,8 @@ export default function Dashboard() {
             title="Incidentes por severidade"
             subtitle={
               <>
-                Fonte: <code>aggBySeverity</code>. Clica numa barra para abrir Incidentes filtrado por severidade.
+                Fonte: <code>aggBySeverity</code>. Clica numa barra para abrir Incidentes filtrado por
+                severidade.
               </>
             }
           >

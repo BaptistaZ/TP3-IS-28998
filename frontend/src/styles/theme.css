@@ -1,53 +1,91 @@
 :root {
-  /* Theme (light, enterprise) */
+  /* =============================================================================
+   * Base theme (light / enterprise)
+   * =============================================================================
+   * Global design tokens used across the UI (colors, typography, shadows, radii, etc.).
+   */
+
+  /* Backgrounds / surfaces */
   --bg: #f6f8fb;
   --surface: #ffffff;
   --surface-2: #fbfcfe;
   --surface-3: #f1f5f9;
 
+  /* Text colors */
   --text: #0f172a;
   --muted: #475569;
   --muted-2: #64748b;
 
+  /* Borders and separators */
   --border: rgba(15, 23, 42, 0.10);
   --border-2: rgba(15, 23, 42, 0.14);
 
+  /* Brand / primary action */
   --primary: #2563eb;
   --primary-700: #1d4ed8;
 
+  /* Status feedback */
   --danger: #dc2626;
   --warning: #d97706;
   --success: #16a34a;
   --info: #0284c7;
 
+  /* Typography */
   --font: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
   --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
 
+  /* Layout */
   --maxw: 1200px;
   --radius: 12px;
   --radius-sm: 10px;
+
+  /* Shadows */
   --shadow-sm: 0 10px 24px rgba(15, 23, 42, 0.08);
 
+  /* Accessibility: focus ring */
   --focus-ring: 0 0 0 4px rgba(37, 99, 235, 0.18);
 
+  /* Chart palette */
   --chart-1: #2563eb;
   --chart-2: #0ea5e9;
   --chart-grid: rgba(15, 23, 42, 0.10);
 }
 
-* { box-sizing: border-box; }
+* {
+  /* Normalize box model to avoid width/padding surprises */
+  box-sizing: border-box;
+}
 
-html, body {
+html,
+body {
+  /* Full-height layout (useful for shells with sidebars / sticky areas) */
   height: 100%;
   margin: 0;
+
+  /* Global defaults */
   font-family: var(--font);
   color: var(--text);
   background: var(--bg);
 }
 
-::selection { background: rgba(37, 99, 235, 0.18); }
+::selection {
+  /* Selection color aligned with primary */
+  background: rgba(37, 99, 235, 0.18);
+}
 
-a { color: var(--primary); text-decoration: none; }
-a:hover { text-decoration: underline; }
+a {
+  /* Theme-colored links, no underline by default */
+  color: var(--primary);
+  text-decoration: none;
+}
 
-code, pre { font-family: var(--mono); }
+a:hover {
+  /* Hover affordance without layout shift */
+  text-decoration: underline;
+}
+
+code,
+pre {
+  /* Code always in monospace */
+  font-family: var(--mono);
+}

@@ -1,25 +1,82 @@
+/* =============================================================================
+ * Global rendering / font smoothing
+ * =============================================================================
+ * Improves text rendering and font smoothing across browsers.
+ */
+
 :root {
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
 
+/* =============================================================================
+ * Base body defaults
+ * =============================================================================
+ * - Ensures a minimum layout width for very small screens
+ * - Sets a consistent line-height for readability
+ */
+
 body {
   min-width: 320px;
   line-height: 1.45;
 }
 
-img { max-width: 100%; display: block; }
-button, input, select, textarea { font: inherit; }
+/* =============================================================================
+ * Element safe defaults
+ * =============================================================================
+ * - Makes images responsive by default
+ * - Forces form controls to inherit the app font
+ */
 
-:focus { outline: none; }
+img {
+  max-width: 100%;
+  display: block;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+/* =============================================================================
+ * Focus styles (accessibility)
+ * =============================================================================
+ * Removes default outlines but keeps a visible focus ring for keyboard users.
+ */
+
+:focus {
+  outline: none;
+}
+
 :focus-visible {
   box-shadow: var(--focus-ring);
   border-color: rgba(37, 99, 235, 0.55);
 }
 
-h1, h2, h3 { margin: 0; }
-p { margin: 0; }
+/* =============================================================================
+ * Typography spacing resets
+ * =============================================================================
+ * Removes default margins so spacing is controlled by the UI layer.
+ */
+
+h1,
+h2,
+h3 {
+  margin: 0;
+}
+
+p {
+  margin: 0;
+}
+
+/* =============================================================================
+ * Reduced motion
+ * =============================================================================
+ * Respects OS reduced-motion preference by effectively disabling animations/transitions.
+ */
 
 @media (prefers-reduced-motion: reduce) {
   * {

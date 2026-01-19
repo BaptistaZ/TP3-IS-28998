@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import argparse
 import csv
 import json
@@ -5,12 +7,14 @@ import random
 import string
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import List, Sequence, Tuple
 
 
-# ----------------------------
-# CSV schema definitions
-# ----------------------------
-HEADER = [
+# =============================================================================
+# CSV schema
+# =============================================================================
+
+HEADER: List[str] = [
     "incident_id",
     "source",
     "incident_type",
@@ -38,24 +42,22 @@ HEADER = [
 ]
 
 
-# ----------------------------
-# Domain enumerations
-# ----------------------------
+# =============================================================================
+# Domain enumerations (controlled vocabularies)
+# =============================================================================
 
-# Where the incident was reported from
-SOURCES = ["citizen", "sensor", "authority", "media"]
-
-# Incident categories
-TYPES = ["fire", "flood", "accident", "outage", "medical", "hazard", "crime", "landslide"]
-
-# Workflow status
-STATUSES = ["reported", "validated", "in_progress", "resolved", "cancelled"]
+SOURCES: List[str] = ["citizen", "sensor", "authority", "media"]
+TYPES: List[str] = ["fire", "flood", "accident", "outage", "medical", "hazard", "crime", "landslide"]
+STATUSES: List[str] = ["reported", "validated", "in_progress", "resolved", "cancelled"]
 
 
-# ----------------------------
-# World cities seed list
-# ----------------------------
-CITIES_WORLD = [
+# =============================================================================
+# World cities seed list (city, country, continent, lat, lon)
+# =============================================================================
+
+CitySeed = Tuple[str, str, str, float, float]
+
+CITIES_WORLD: List[CitySeed] = [
     ("Lisbon", "Portugal", "Europe", 38.7223, -9.1393),
     ("Porto", "Portugal", "Europe", 41.1579, -8.6291),
     ("Madrid", "Spain", "Europe", 40.4168, -3.7038),
@@ -90,20 +92,38 @@ CITIES_WORLD = [
 ]
 
 
-# ----------------------------
-# Text fields to make data "feel" real
-# ----------------------------
+# =============================================================================
+# Free-text fields (for search / realism)
+# =============================================================================
 
-# Tags are useful for search + filtering in UI and XPath queries
-TAGS_POOL = [
-    "smoke", "highway", "school", "hospital", "downtown", "suburb", "river",
-    "powerline", "storm", "crowd", "chemical", "wildfire", "industrial",
-    "traffic", "bridge", "evacuation", "hazmat", "blackout", "ambulance",
-    "firefighters", "police", "injuries", "collapse", "aftershock"
+TAGS_POOL: List[str] = [
+    "smoke",
+    "highway",
+    "school",
+    "hospital",
+    "downtown",
+    "suburb",
+    "river",
+    "powerline",
+    "storm",
+    "crowd",
+    "chemical",
+    "wildfire",
+    "industrial",
+    "traffic",
+    "bridge",
+    "evacuation",
+    "hazmat",
+    "blackout",
+    "ambulance",
+    "firefighters",
+    "police",
+    "injuries",
+    "collapse",
+    "aftershock",
 ]
 
-# Short note snippets to emulate operator notes
-NOTES_SNIPPETS = [
+NOTES_SNIPPETS: List[str] = [
     "Caller reports heavy smoke in the area.",
     "Multiple vehicles involved. Traffic blocked.",
     "Sensor anomaly detected. Dispatch requested.",
@@ -113,36 +133,54 @@ NOTES_SNIPPETS = [
     "Medical assistance requested; patient unconscious.",
     "Authorities validating incident details.",
     "Wind conditions worsening. Escalation possible.",
-    "Crowd gathering; police requested for control."
+    "Crowd gathering; police requested for control.",
 ]
 
 
-# ----------------------------
-# Utility helpers
-# ----------------------------
+# =============================================================================
+# Low-level helpers
+# =============================================================================
 
-# Generate a deterministic-looking ID
+# Clamp a value to a given range.
+def clamp(value: float, lo: float, hi: float) -> float:
+    return max(lo, min(hi, value))
+
+
+# Generate a random ID with a given prefix.
 def rand_id(prefix: str, n: int = 12) -> str:
     chars = string.ascii_uppercase + string.digits
     return f"{prefix}_" + "".join(random.choice(chars) for _ in range(n))
 
-# Pick a random city and add some noise to lat/lon
-def pick_city_world():
+
+# Pick a random city from the seed list, adding small random noise to lat/lon.
+def pick_city_world() -> Tuple[str, str, str, float, float]:
     city, country, continent, lat, lon = random.choice(CITIES_WORLD)
     lat += random.uniform(-0.08, 0.08)
     lon += random.uniform(-0.08, 0.08)
     return city, country, continent, round(lat, 6), round(lon, 6)
 
-# Clamp numeric value into [lo, hi]
-def clamp(v, lo, hi):
-    return max(lo, min(hi, v))
+
+# Pick a random set of tags from the pool.
+def pick_tags(k_min: int = 1, k_max: int = 4) -> str:
+    k = random.randint(k_min, k_max)
+    return ";".join(random.sample(TAGS_POOL, k))
 
 
-# ----------------------------
-# Business-rule-like metrics
-# ----------------------------
+# Pick a random notes snippet, possibly adding extra info.
+def pick_notes() -> str:
+    note = random.choice(NOTES_SNIPPETS)
+    if random.random() < 0.25:
+        note += " " + random.choice(
+            ["Units en route.", "Awaiting confirmation.", "Area secured.", "Situation evolving."]
+        )
+    return note
 
-# Rule-based score, it changes with severity, status, source
+
+# =============================================================================
+# Business-style derived metrics (for BI / analytics)
+# =============================================================================
+
+# Compute a risk score between 0.0 and 1.0 based on severity, status, and source.
 def compute_risk(severity: int, status: str, source: str) -> float:
     base = severity / 5.0
     status_boost = {
@@ -153,56 +191,45 @@ def compute_risk(severity: int, status: str, source: str) -> float:
         "cancelled": -0.30,
     }.get(status, 0.0)
     source_boost = 0.05 if source == "sensor" else 0.0
-    risk = clamp(base + status_boost + source_boost + random.uniform(-0.05, 0.05), 0.0, 1.0)
-    return round(risk, 3)
 
-# Estimated cost in euros based on severity, resources, type
+    risk = base + status_boost + source_boost + random.uniform(-0.05, 0.05)
+    return round(clamp(risk, 0.0, 1.0), 3)
+
+
+# Compute an estimated cost in euros based on severity, resources, and incident type.
 def compute_cost(severity: int, resources: int, incident_type: str) -> float:
     type_factor = {
-        "fire": 2.2, "flood": 2.0, "accident": 1.4, "outage": 1.3,
-        "medical": 1.1, "hazard": 2.5, "crime": 1.2, "landslide": 2.1
+        "fire": 2.2,
+        "flood": 2.0,
+        "accident": 1.4,
+        "outage": 1.3,
+        "medical": 1.1,
+        "hazard": 2.5,
+        "crime": 1.2,
+        "landslide": 2.1,
     }.get(incident_type, 1.3)
+
     cost = (severity * 350) * type_factor + resources * random.uniform(120, 600)
     cost *= random.uniform(0.8, 1.3)
     return round(cost, 2)
 
-# Pick a random set of tags
-def pick_tags(k_min=1, k_max=4) -> str:
-    k = random.randint(k_min, k_max)
-    return ";".join(random.sample(TAGS_POOL, k))
 
-# Pick a random note snippet
-def pick_notes() -> str:
-    s = random.choice(NOTES_SNIPPETS)
-    if random.random() < 0.25:
-        s += " " + random.choice(["Units en route.", "Awaiting confirmation.", "Area secured.", "Situation evolving."])
-    return s
-
-
-# ----------------------------
+# =============================================================================
 # Row generation
-# ----------------------------
-def generate_row(now_utc: datetime):
+# =============================================================================
+
+# Generate a single CSV row as a list of strings.
+def generate_row(now_utc: datetime) -> List[str]:
     incident_id = rand_id("INC", 14)
-    # Sources distribution: mostly citizens, then sensors, then authorities
+
     source = random.choices(SOURCES, weights=[0.55, 0.20, 0.20, 0.05], k=1)[0]
-
-    # Incident types distribution
     incident_type = random.choices(TYPES, weights=[0.16, 0.10, 0.20, 0.12, 0.16, 0.08, 0.12, 0.06], k=1)[0]
-
-    # severity and status distributions
     severity = random.choices([1, 2, 3, 4, 5], weights=[0.18, 0.28, 0.28, 0.18, 0.08], k=1)[0]
-
-    # Status distribution: many resolved, some active, some cancelled
     status = random.choices(STATUSES, weights=[0.12, 0.20, 0.22, 0.38, 0.08], k=1)[0]
 
-    # Global location (real city + jitter)
     city, country, continent, lat, lon = pick_city_world()
-
-    # Accuracy: sensors are usually more precise than manual reports
     accuracy = random.randint(10, 60) if source == "sensor" else random.randint(30, 250)
 
-    # Reported time within the last 30 days
     reported_at = now_utc - timedelta(minutes=random.randint(0, 60 * 24 * 30))
     reported_at = reported_at.replace(tzinfo=timezone.utc)
 
@@ -210,41 +237,34 @@ def generate_row(now_utc: datetime):
     resolved_at = ""
     response_time_min = ""
 
-    #  Assigned unit code
     assigned_unit = f"UNIT_{random.randint(1, 120):03d}"
-
-    # resources based on severity
     resources = random.choices([1, 2, 3, 4, 5, 6], weights=[0.20, 0.25, 0.22, 0.16, 0.10, 0.07], k=1)[0]
 
-    # # ETA: generally faster for higher severity (more urgent dispatch)
-    eta = random.randint(3, 45) + (5 - severity) * random.randint(0, 3)  # mais severo -> geralmente mais rápido
+    # ETA tends to be shorter for higher severity (more urgent dispatch).
+    eta = random.randint(3, 45) + (5 - severity) * random.randint(0, 3)
     eta = int(clamp(eta, 2, 90))
 
-    # Workflow timestamps depend on status
     if status in ("validated", "in_progress", "resolved"):
         v_dt = reported_at + timedelta(minutes=random.randint(5, 240))
         validated_at = v_dt.isoformat().replace("+00:00", "Z")
 
     if status == "resolved":
-        # response time must be >= ETA; add extra variability.
+        # Response time should be >= ETA; add variability.
         rt = random.randint(eta, eta + random.randint(10, 240))
         response_time_min = str(rt)
+
         r_dt = reported_at + timedelta(minutes=rt + random.randint(15, 720))
         resolved_at = r_dt.isoformat().replace("+00:00", "Z")
 
-    # Sometimes cancelled incidents are also validated (false positives, etc.)
+    # Some cancelled incidents may have been validated (false positives, etc.).
     if status == "cancelled" and random.random() < 0.3:
         v_dt = reported_at + timedelta(minutes=random.randint(5, 240))
         validated_at = v_dt.isoformat().replace("+00:00", "Z")
 
-    # Derived metrics for BI/analytics.
     risk = compute_risk(severity, status, source)
     cost = compute_cost(severity, resources, incident_type)
 
-    # Small chance of location correction after validation
     location_corrected = 1 if random.random() < 0.05 else 0
-
-    # Searchable fields
     tags = pick_tags()
     notes = pick_notes()
 
@@ -277,45 +297,80 @@ def generate_row(now_utc: datetime):
         notes,
     ]
 
-# ----------------------------
-# CLI and main loop
-# ----------------------------
-def parse_args():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--target-mb", type=int, required=True, help="Tamanho alvo aproximado em MB (ex.: 50, 200)")
-    ap.add_argument("--out", type=str, required=True, help="Caminho do CSV a gerar")
-    ap.add_argument("--seed", type=int, default=42, help="Seed para reprodutibilidade")
-    ap.add_argument("--manifest-out", type=str, default="", help="Opcional: caminho para manifest JSON")
-    return ap.parse_args()
 
-def main():
+# =============================================================================
+# CLI
+# =============================================================================
+
+# Parse command-line arguments.
+def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Generate a synthetic incidents CSV dataset.")
+    parser.add_argument("--target-mb", type=int, required=True, help="Approximate output size in MB (e.g., 50, 200).")
+    parser.add_argument("--out", type=str, required=True, help="Output CSV file path.")
+    parser.add_argument("--seed", type=int, default=42, help="Random seed for reproducibility.")
+    parser.add_argument("--manifest-out", type=str, default="", help="Optional output path for the JSON manifest.")
+    return parser.parse_args(argv)
+
+
+# =============================================================================
+# Main
+# =============================================================================
+
+# Write a JSON manifest file describing the generated dataset.
+def write_manifest(
+    *,
+    out_path: Path,
+    target_mb: int,
+    actual_bytes: int,
+    approx_rows: int,
+    seed: int,
+    manifest_out: Path,
+) -> None:
+    manifest = {
+        "name": out_path.name,
+        "path": str(out_path),
+        "target_mb": target_mb,
+        "actual_bytes": actual_bytes,
+        "approx_rows": approx_rows,
+        "seed": seed,
+        "schema": HEADER,
+        "generated_at_utc": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        "domain": "emergencies_incidents",
+        "notes": "Synthetic global incidents dataset for the TP3 pipeline and UI (map, workflow, KPIs).",
+    }
+
+    manifest_out.parent.mkdir(parents=True, exist_ok=True)
+    with manifest_out.open("w", encoding="utf-8") as mf:
+        json.dump(manifest, mf, ensure_ascii=False, indent=2)
+
+
+# Main function.
+def main() -> None:
     args = parse_args()
     random.seed(args.seed)
 
     out_path = Path(args.out)
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
-    # Convert MB target into bytes
     target_bytes = args.target_mb * 1024 * 1024
-    #  # Use a fixed 'now' per run
     now_utc = datetime.now(timezone.utc)
 
     rows = 0
     bytes_written = 0
 
-    # Write CSV incrementally until approximate target file size is reached
+    # Write CSV incrementally until the file crosses the target size.
     with out_path.open("w", newline="", encoding="utf-8") as f:
-        w = csv.writer(f)
-        # Write header once
-        w.writerow(HEADER)
+        writer = csv.writer(f)
+        writer.writerow(HEADER)
+
         f.flush()
         bytes_written = out_path.stat().st_size
 
-        # Generate rows until file size crosses the target
         while bytes_written < target_bytes:
-            w.writerow(generate_row(now_utc))
+            writer.writerow(generate_row(now_utc))
             rows += 1
 
+            # Periodically flush to update file size without being too expensive.
             if rows % 2000 == 0:
                 f.flush()
                 bytes_written = out_path.stat().st_size
@@ -323,31 +378,24 @@ def main():
         f.flush()
         bytes_written = out_path.stat().st_size
 
-    # Build a manifest JSON
-    manifest = {
-        "name": out_path.name,
-        "path": str(out_path),
-        "target_mb": args.target_mb,
-        "actual_bytes": bytes_written,
-        "approx_rows": rows,
-        "seed": args.seed,
-        "schema": HEADER,
-        "generated_at_utc": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
-        "domain": "emergencies_incidents",
-        "notes": "Synthetic global incidents dataset for TP3 pipeline + frontend (map, workflow, timeline, KPIs).",
-    }
+    manifest_out_arg = args.manifest_out.strip()
+    if manifest_out_arg:
+        manifest_out = Path(manifest_out_arg)
+    else:
+        manifest_out = Path("datasets/manifests") / f"{out_path.stem}.manifest.json"
 
-    manifest_out = args.manifest_out.strip()
-    if not manifest_out:
-        default_manifest = Path("datasets/manifests") / f"{out_path.stem}.manifest.json"
-        default_manifest.parent.mkdir(parents=True, exist_ok=True)
-        manifest_out = str(default_manifest)
+    write_manifest(
+        out_path=out_path,
+        target_mb=args.target_mb,
+        actual_bytes=bytes_written,
+        approx_rows=rows,
+        seed=args.seed,
+        manifest_out=manifest_out,
+    )
 
-    with open(manifest_out, "w", encoding="utf-8") as mf:
-        json.dump(manifest, mf, ensure_ascii=False, indent=2)
-
-    print(f"[OK] CSV gerado: {out_path} ({bytes_written/1024/1024:.2f} MB) ~{rows} linhas")
+    print(f"[OK] CSV generated: {out_path} ({bytes_written / 1024 / 1024:.2f} MB) ~{rows} rows")
     print(f"[OK] Manifest: {manifest_out}")
+
 
 if __name__ == "__main__":
     main()

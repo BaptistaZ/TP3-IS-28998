@@ -1,19 +1,37 @@
+/* =============================================================================
+ * Dashboard layout
+ * =============================================================================
+ * Estrutura base da página (grid simples com espaçamento consistente).
+ */
+
 .page {
   display: grid;
-  gap: 14px;
+  gap: 14px; /* spacing entre secções (header, kpis, charts, etc.) */
 }
+
+/* =============================================================================
+ * Charts grid (2 colunas -> 1 coluna em ecrãs pequenos)
+ * =============================================================================
+ * Mantém os dois gráficos lado-a-lado em desktop e empilha em mobile/tablet.
+ */
 
 .chartsGrid {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 12px;
+  gap: 12px; /* spacing entre cards */
 }
 
 @media (max-width: 900px) {
   .chartsGrid {
-    grid-template-columns: 1fr;
+    grid-template-columns: 1fr; /* stack vertical em ecrãs estreitos */
   }
 }
+
+/* =============================================================================
+ * Loading skeleton sizes
+ * =============================================================================
+ * Alturas fixas para evitar layout shift enquanto o Recharts carrega dados.
+ */
 
 .chartSkeleton {
   height: 320px;
@@ -22,6 +40,12 @@
 .chartSkeletonTall {
   height: 380px;
 }
+
+/* =============================================================================
+ * Chart container sizes
+ * =============================================================================
+ * Recharts usa ResponsiveContainer -> precisa de um pai com altura definida.
+ */
 
 .chartBox {
   height: 320px;

@@ -1,13 +1,13 @@
 import os
 import time
 import json
-from datetime import datetime
 import csv
-import io
-from typing import Dict, Any, List
-from xmlrpc.client import ServerProxy
+from datetime import datetime
 from contextlib import contextmanager, closing
-from io import TextIOWrapper, BufferedReader
+from io import TextIOWrapper
+from typing import Dict, Any, List
+
+from xmlrpc.client import ServerProxy
 
 import boto3
 from botocore.client import Config
@@ -15,13 +15,14 @@ import requests
 from dotenv import load_dotenv
 
 from weather_client import fetch_weather
-from state_store import with_locked_state  # <-- NOVO
+from state_store import with_locked_state
 
 load_dotenv()
 
-# -----------------------------
+# =============================================================================
 # Environment / Configuration
-# -----------------------------
+# =============================================================================
+
 ENDPOINT = os.getenv("SUPABASE_S3_ENDPOINT")
 REGION = os.getenv("SUPABASE_S3_REGION", "eu-central-1")
 ACCESS_KEY = os.getenv("SUPABASE_S3_ACCESS_KEY")
@@ -33,18 +34,19 @@ OUT_PREFIX = os.getenv("SUPABASE_PROCESSED_PREFIX", "processed/")
 POLL_SECONDS = int(os.getenv("PROCESSOR_POLL_SECONDS", "10"))
 TMP_DIR = os.getenv("PROCESSOR_LOCAL_TMP", "tmp")
 
-# External API used for enrichment (EUR -> USD)
+# External FX source (REST fallback only). Primary path is XML-RPC via rpc-service.
 FX_URL = os.getenv(
     "EXTERNAL_API_FX_URL",
-    "https://api.frankfurter.app/latest?from=EUR&to=USD"
+    "https://api.frankfurter.app/latest?from=EUR&to=USD",
 )
 
+# Local persistent state shared with the webhook service via a Docker volume.
 STATE_PATH = os.path.join(TMP_DIR, "processor_state.json")
 
-# Progress logs
+# Progress logs while mapping large files.
 PROGRESS_EVERY = int(os.getenv("PROCESSOR_PROGRESS_EVERY", "2000"))
 
-# Estado inicial (para state_store)
+# State schema defaults (used if state file does not exist yet).
 INIT_STATE = {
     "processed_keys": [],
     "ingest_results": {},
@@ -52,16 +54,14 @@ INIT_STATE = {
     "webhook_events": {},
 }
 
-
-# -----------------------------
+# =============================================================================
 # XML Service integration
-# -----------------------------
+# =============================================================================
+
+# Load or generate the mapper JSON used during ingest.
+
+
 def load_mapper_json_text() -> str:
-    """
-    Lê o mapper JSON a enviar no ingest.
-    Preferência: ficheiro definido em MAPPER_FILE.
-    Fallback: gera um JSON mínimo com versão.
-    """
     mapper_path = os.getenv("MAPPER_FILE", "/app/mapper.json")
     mapper_version = os.getenv("MAPPER_VERSION", "1.0.0")
 
@@ -70,9 +70,11 @@ def load_mapper_json_text() -> str:
             txt = f.read().strip()
             if not txt:
                 raise ValueError("empty mapper file")
-            # valida que é JSON
+
+            # Validate JSON to avoid sending malformed payloads downstream.
             json.loads(txt)
             return txt
+
     except Exception as e:
         fallback = {
             "version": mapper_version,
@@ -86,34 +88,27 @@ def load_mapper_json_text() -> str:
                 "continent": "continente",
                 "lat": "latitude",
                 "lon": "longitude",
-                "estimated_cost_eur": "custo_estimado_eur"
+                "estimated_cost_eur": "custo_estimado_eur",
             },
-            "note": f"fallback mapper_json ({e})"
+            "note": f"fallback mapper_json ({e})",
         }
         return json.dumps(fallback, ensure_ascii=False)
 
 
+# Send the mapped CSV to the XML Service for ingestion.
 def send_to_xml_service(mapped_csv_path: str, source_key: str) -> Dict[str, Any]:
-    """
-    Sends the mapped CSV to the XML Service via multipart/form-data.
-    The XML Service will:
-      - validate payload
-      - generate XML
-      - persist XML into Postgres
-      - call back the webhook URL asynchronously
-
-    Returns the XML Service JSON response (sync response).
-    """
     ingest_url = os.getenv("XML_SERVICE_INGEST_URL",
                            "http://localhost:7001/ingest")
-    webhook_url = os.getenv("PROCESSOR_WEBHOOK_URL",
-                            "http://localhost:8000/webhook/xml-status")
+    webhook_url = os.getenv(
+        "PROCESSOR_WEBHOOK_URL",
+        "http://localhost:8000/webhook/xml-status",
+    )
     mapper_version = os.getenv("MAPPER_VERSION", "1.0.0")
     timeout_s = int(os.getenv("XML_SERVICE_TIMEOUT_SECONDS", "20"))
     prefix = os.getenv("PROCESSOR_REQUEST_ID_PREFIX", "Processor")
     mapper_json_text = load_mapper_json_text()
 
-    # Build a unique, traceable request id
+    # Correlation ID used to match the webhook callback to this ingest.
     ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
     safe_key = source_key.replace("/", "_").replace(":", "_")
     request_id = f"{prefix}_{safe_key}_{ts}"
@@ -131,15 +126,18 @@ def send_to_xml_service(mapped_csv_path: str, source_key: str) -> Dict[str, Any]
         r = requests.post(ingest_url, data=data,
                           files=files, timeout=timeout_s)
         r.raise_for_status()
+
         resp = r.json()
+        # Keep local metadata for traceability in logs/state.
         resp["_request_id"] = request_id
         resp["_source_key"] = source_key
         return resp
 
 
-# -----------------------------
+# =============================================================================
 # S3 (Supabase Storage) client
-# -----------------------------
+# =============================================================================
+
 def s3_client():
     return boto3.client(
         "s3",
@@ -152,14 +150,16 @@ def s3_client():
     )
 
 
-def ensure_tmp():
+def ensure_tmp() -> None:
     os.makedirs(TMP_DIR, exist_ok=True)
 
 
-# -----------------------------
-# External enrichment
-# -----------------------------
+# =============================================================================
+# External enrichment (FX + Weather)
+# =============================================================================
+
 def _to_float(value: Any) -> float:
+    # Normalizes possible XML-RPC numeric return shapes to a Python float.
     if isinstance(value, (int, float)):
         return float(value)
     if isinstance(value, bytes):
@@ -169,11 +169,8 @@ def _to_float(value: Any) -> float:
     return float(str(value).strip())
 
 
-def fetch_fx_eur_usd():
-    """
-    Prefer XML-RPC (internal protocol requirement).
-    Fallback to direct REST call if XML-RPC is unavailable.
-    """
+# Fetch current EUR -> USD exchange rate, prefer XML-RPC service.
+def fetch_fx_eur_usd() -> float:
     rpc_host = os.getenv("RPC_SERVICE_HOST", "localhost")
     rpc_port = int(os.getenv("RPC_SERVICE_PORT", "9000"))
     rpc_url = f"http://{rpc_host}:{rpc_port}/RPC2"
@@ -193,6 +190,7 @@ def fetch_fx_eur_usd():
         r.raise_for_status()
         data = r.json()
 
+        # Support common FX API response shapes.
         if "rates" in data and "USD" in data["rates"]:
             rate = float(data["rates"]["USD"])
             print(f"[Processor] FX via REST OK -> {rate}")
@@ -206,30 +204,26 @@ def fetch_fx_eur_usd():
         raise RuntimeError(f"Unexpected FX API response: {data}")
 
 
-# -----------------------------
-# S3 helpers
-# -----------------------------
+# =============================================================================
+# S3 helpers (incoming discovery + streaming read)
+# =============================================================================
+
 def list_new_csv_objects(s3, processed_keys: List[str]) -> List[str]:
+    # Note: list_objects_v2 returns a single page; acceptable for the assignment bucket usage.
     resp = s3.list_objects_v2(Bucket=BUCKET, Prefix=IN_PREFIX)
     items = resp.get("Contents", [])
     items.sort(key=lambda x: x["LastModified"])  # oldest -> newest
+
     keys = [it["Key"] for it in items if it["Key"].endswith(".csv")]
     return [k for k in keys if k not in processed_keys]
 
 
+# Open an S3 object as a text stream (context manager).
 @contextmanager
 def open_object_text_stream(s3, key: str, encoding: str = "utf-8"):
-    """
-    Abre um stream de texto para um objeto S3 sem carregar o ficheiro todo em memória.
-    Uso:
-        with open_object_text_stream(s3, key) as f:
-            reader = csv.DictReader(f)
-            ...
-    """
     obj = s3.get_object(Bucket=BUCKET, Key=key)
-    body = obj["Body"]  # botocore.response.StreamingBody (streaming)
+    body = obj["Body"]  # StreamingBody
 
-    # Buffer + wrapper de texto para o csv.DictReader ler linha-a-linha
     with closing(body) as b:
         wrapped = TextIOWrapper(b, encoding=encoding, newline="")
         try:
@@ -238,30 +232,58 @@ def open_object_text_stream(s3, key: str, encoding: str = "utf-8"):
             wrapped.close()
 
 
-# -----------------------------
-# Mapping / transformation
-# -----------------------------
-def write_mapped_csv(local_path: str, input_stream, fx_usd: float):
-    MAX_WEATHER_CALLS_PER_FILE = int(
-        os.getenv("MAX_WEATHER_CALLS_PER_FILE", "300"))
+# =============================================================================
+# Mapping / transformation (CSV -> mapped CSV)
+# =============================================================================
+
+def write_mapped_csv(local_path: str, input_stream, fx_usd: float) -> None:
+    # Hard budget to avoid excessive external calls per input file.
+    max_weather_calls = int(os.getenv("MAX_WEATHER_CALLS_PER_FILE", "300"))
 
     reader = csv.DictReader(input_stream)
 
+    # Output schema consumed by the XML Service (required columns enforced there).
     fieldnames = [
-        "id_ocorrencia", "origem", "tipo_ocorrencia", "nivel_gravidade", "estado",
-        "cidade", "pais", "continente", "latitude", "longitude", "precisao_m",
-        "reportado_em", "validado_em", "resolvido_em", "ultima_atualizacao_utc",
-        "unidade_atribuida", "num_recursos", "eta_min", "tempo_resposta_min",
-        "custo_estimado_eur", "custo_estimado_usd", "score_risco", "local_corrigido",
-        "etiquetas", "observacoes", "fx_eur_usd",
-        "meteo_fonte", "meteo_temp_c", "meteo_vento_kmh", "meteo_precip_mm",
-        "meteo_codigo", "meteo_time_utc",
-        "versao_mapper", "processado_em_utc",
+        "id_ocorrencia",
+        "origem",
+        "tipo_ocorrencia",
+        "nivel_gravidade",
+        "estado",
+        "cidade",
+        "pais",
+        "continente",
+        "latitude",
+        "longitude",
+        "precisao_m",
+        "reportado_em",
+        "validado_em",
+        "resolvido_em",
+        "ultima_atualizacao_utc",
+        "unidade_atribuida",
+        "num_recursos",
+        "eta_min",
+        "tempo_resposta_min",
+        "custo_estimado_eur",
+        "custo_estimado_usd",
+        "score_risco",
+        "local_corrigido",
+        "etiquetas",
+        "observacoes",
+        "fx_eur_usd",
+        "meteo_fonte",
+        "meteo_temp_c",
+        "meteo_vento_kmh",
+        "meteo_precip_mm",
+        "meteo_codigo",
+        "meteo_time_utc",
+        "versao_mapper",
+        "processado_em_utc",
     ]
 
     processed_at = datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
     mapper_version = os.getenv("MAPPER_VERSION", "1.0.0")
 
+    # Small in-process cache: rounded (lat,lon) -> weather payload.
     weather_cache: Dict[tuple, dict] = {}
     empty_weather = {
         "weather_source": "",
@@ -291,12 +313,16 @@ def write_mapped_csv(local_path: str, input_stream, fx_usd: float):
                 elapsed = time.time() - t0
                 rps = rows_written / elapsed if elapsed > 0 else 0.0
                 print(
-                    f"[Processor] mapping... rows={rows_written} elapsed={elapsed:.1f}s (~{rps:.1f} rows/s)")
+                    f"[Processor] mapping... rows={rows_written} elapsed={elapsed:.1f}s "
+                    f"(~{rps:.1f} rows/s)"
+                )
 
+            # Compute USD cost using current FX rate (EUR is always present in input).
             cost_eur_str = (row.get("estimated_cost_eur") or "").strip()
             cost_eur = float(cost_eur_str) if cost_eur_str else 0.0
             cost_usd = round(cost_eur * fx_usd, 6)
 
+            # Weather enrichment is optional and budgeted.
             weather = None
             try:
                 lat_raw = (row.get("lat") or "").strip()
@@ -306,17 +332,17 @@ def write_mapped_csv(local_path: str, input_stream, fx_usd: float):
                     lat = float(lat_raw)
                     lon = float(lon_raw)
 
-                    ROUND_DECIMALS = int(
+                    round_decimals = int(
                         os.getenv("WEATHER_ROUND_DECIMALS", "1"))
-                    lat2 = round(lat, ROUND_DECIMALS)
-                    lon2 = round(lon, ROUND_DECIMALS)
+                    lat2 = round(lat, round_decimals)
+                    lon2 = round(lon, round_decimals)
                     wkey = (lat2, lon2)
 
                     if wkey in weather_cache:
                         weather = weather_cache[wkey]
                         weather_hits += 1
                     else:
-                        if weather_calls < MAX_WEATHER_CALLS_PER_FILE:
+                        if weather_calls < max_weather_calls:
                             weather_calls += 1
                             weather = fetch_weather(lat2, lon2)
                             if weather:
@@ -330,57 +356,54 @@ def write_mapped_csv(local_path: str, input_stream, fx_usd: float):
             if not weather:
                 weather = empty_weather
 
-            writer.writerow({
-                "id_ocorrencia": row.get("incident_id", ""),
-                "origem": row.get("source", ""),
-                "tipo_ocorrencia": row.get("incident_type", ""),
-                "nivel_gravidade": row.get("severity", ""),
-                "estado": row.get("status", ""),
-
-                "cidade": row.get("city", ""),
-                "pais": row.get("country", ""),
-                "continente": row.get("continent", ""),
-                "latitude": row.get("lat", ""),
-                "longitude": row.get("lon", ""),
-                "precisao_m": row.get("location_accuracy_m", ""),
-
-                "reportado_em": row.get("reported_at", ""),
-                "validado_em": row.get("validated_at", ""),
-                "resolvido_em": row.get("resolved_at", ""),
-                "ultima_atualizacao_utc": row.get("last_update_utc", ""),
-
-                "unidade_atribuida": row.get("assigned_unit", ""),
-                "num_recursos": row.get("resources_count", ""),
-                "eta_min": row.get("response_eta_min", ""),
-                "tempo_resposta_min": row.get("response_time_min", ""),
-
-                "custo_estimado_eur": f"{cost_eur:.2f}",
-                "custo_estimado_usd": f"{cost_usd:.2f}",
-                "score_risco": row.get("risk_score", ""),
-                "local_corrigido": row.get("location_corrected", ""),
-
-                "etiquetas": row.get("tags", ""),
-                "observacoes": row.get("notes", ""),
-                "fx_eur_usd": fx_usd,
-
-                "meteo_fonte": weather.get("weather_source", ""),
-                "meteo_temp_c": weather.get("weather_temperature_c", ""),
-                "meteo_vento_kmh": weather.get("weather_wind_kmh", ""),
-                "meteo_precip_mm": weather.get("weather_precip_mm", ""),
-                "meteo_codigo": weather.get("weather_code", ""),
-                "meteo_time_utc": weather.get("weather_time_utc", ""),
-
-                "versao_mapper": mapper_version,
-                "processado_em_utc": processed_at,
-            })
+            writer.writerow(
+                {
+                    "id_ocorrencia": row.get("incident_id", ""),
+                    "origem": row.get("source", ""),
+                    "tipo_ocorrencia": row.get("incident_type", ""),
+                    "nivel_gravidade": row.get("severity", ""),
+                    "estado": row.get("status", ""),
+                    "cidade": row.get("city", ""),
+                    "pais": row.get("country", ""),
+                    "continente": row.get("continent", ""),
+                    "latitude": row.get("lat", ""),
+                    "longitude": row.get("lon", ""),
+                    "precisao_m": row.get("location_accuracy_m", ""),
+                    "reportado_em": row.get("reported_at", ""),
+                    "validado_em": row.get("validated_at", ""),
+                    "resolvido_em": row.get("resolved_at", ""),
+                    "ultima_atualizacao_utc": row.get("last_update_utc", ""),
+                    "unidade_atribuida": row.get("assigned_unit", ""),
+                    "num_recursos": row.get("resources_count", ""),
+                    "eta_min": row.get("response_eta_min", ""),
+                    "tempo_resposta_min": row.get("response_time_min", ""),
+                    "custo_estimado_eur": f"{cost_eur:.2f}",
+                    "custo_estimado_usd": f"{cost_usd:.2f}",
+                    "score_risco": row.get("risk_score", ""),
+                    "local_corrigido": row.get("location_corrected", ""),
+                    "etiquetas": row.get("tags", ""),
+                    "observacoes": row.get("notes", ""),
+                    "fx_eur_usd": fx_usd,
+                    "meteo_fonte": weather.get("weather_source", ""),
+                    "meteo_temp_c": weather.get("weather_temperature_c", ""),
+                    "meteo_vento_kmh": weather.get("weather_wind_kmh", ""),
+                    "meteo_precip_mm": weather.get("weather_precip_mm", ""),
+                    "meteo_codigo": weather.get("weather_code", ""),
+                    "meteo_time_utc": weather.get("weather_time_utc", ""),
+                    "versao_mapper": mapper_version,
+                    "processado_em_utc": processed_at,
+                }
+            )
 
     elapsed = time.time() - t0
     rps = rows_written / elapsed if elapsed > 0 else 0.0
     print(
-        f"[Processor] mapping done -> rows={rows_written} elapsed={elapsed:.1f}s (~{rps:.1f} rows/s)")
+        f"[Processor] mapping done -> rows={rows_written} elapsed={elapsed:.1f}s "
+        f"(~{rps:.1f} rows/s)"
+    )
     print(
         "[Processor] weather stats -> "
-        f"budget={MAX_WEATHER_CALLS_PER_FILE} calls={weather_calls} hits={weather_hits} "
+        f"budget={max_weather_calls} calls={weather_calls} hits={weather_hits} "
         f"misses={weather_misses} skipped={weather_skipped} cache_entries={len(weather_cache)}"
     )
 
@@ -392,18 +415,16 @@ def upload_processed_csv(s3, local_path: str, original_key: str) -> str:
     return out_key
 
 
-def delete_original(s3, key: str):
+def delete_original(s3, key: str) -> None:
     s3.delete_object(Bucket=BUCKET, Key=key)
 
 
-# -----------------------------
+# =============================================================================
 # Webhook gating (finalize)
-# -----------------------------
-def finalize_ready_ingests(s3):
-    """
-    Finaliza pendentes quando existir webhook_event.
-    Tudo dentro de 1 lock (sem lost updates).
-    """
+# =============================================================================
+
+# Finalize pending ingests when a webhook event is present for a request_id.
+def finalize_ready_ingests(s3) -> None:
 
     def _tx(state: Dict[str, Any]):
         pending: Dict[str, Any] = state.get("pending_ingests", {}) or {}
@@ -440,7 +461,9 @@ def finalize_ready_ingests(s3):
                 }
 
                 print(
-                    f"[Processor] FINALIZED OK -> uploaded={out_key} deleted={source_key} request_id={request_id}")
+                    f"[Processor] FINALIZED OK -> uploaded={out_key} deleted={source_key} "
+                    f"request_id={request_id}"
+                )
                 done_request_ids.append(request_id)
 
             else:
@@ -457,6 +480,7 @@ def finalize_ready_ingests(s3):
                 )
                 done_request_ids.append(request_id)
 
+        # Cleanup processed request_ids to keep the state file small and avoid re-finalizing.
         for rid in done_request_ids:
             pending.pop(rid, None)
             events.pop(rid, None)
@@ -467,10 +491,9 @@ def finalize_ready_ingests(s3):
     with_locked_state(STATE_PATH, INIT_STATE, _tx)
 
 
-def register_pending_ingest(request_id: str, entry: Dict[str, Any]):
-    """
-    Regista pending dentro de lock para não atropelar updates do webhook.
-    """
+# Register a pending ingest under lock so webhook updates and Processor updates do
+def register_pending_ingest(request_id: str, entry: Dict[str, Any]) -> None:
+
     def _tx(state: Dict[str, Any]):
         state.setdefault("pending_ingests", {})
         state["pending_ingests"][request_id] = entry
@@ -478,10 +501,11 @@ def register_pending_ingest(request_id: str, entry: Dict[str, Any]):
     with_locked_state(STATE_PATH, INIT_STATE, _tx)
 
 
-# -----------------------------
+# =============================================================================
 # Main loop
-# -----------------------------
-def main():
+# =============================================================================
+
+def main() -> None:
     ensure_tmp()
     s3 = s3_client()
 
@@ -493,19 +517,21 @@ def main():
 
     while True:
         try:
-            # 0) Finalize pendentes (gate real)
+            # 0) Finalize pendings first (webhook-gated commit step).
             finalize_ready_ingests(s3)
 
-            # 1) Ler state para ver se ainda há pendentes
+            # 1) Read current state to decide whether we can take new work.
             state = with_locked_state(STATE_PATH, INIT_STATE, lambda s: None)
 
             if state.get("pending_ingests"):
                 print(
-                    f"[Processor] {len(state['pending_ingests'])} pending ingests -> waiting webhook (not taking new files)")
+                    f"[Processor] {len(state['pending_ingests'])} pending ingests -> "
+                    "waiting webhook (not taking new files)"
+                )
                 time.sleep(POLL_SECONDS)
                 continue
 
-            # 2) Normal processing
+            # 2) Normal processing: discover new incoming CSVs.
             fx = fetch_fx_eur_usd()
             processed_keys = state.get("processed_keys", [])
             new_keys = list_new_csv_objects(s3, processed_keys)
@@ -540,17 +566,26 @@ def main():
 
                     if not request_id:
                         raise RuntimeError(
-                            "XML Service response missing _request_id (cannot gate via webhook)")
+                            "XML Service response missing _request_id (cannot gate via webhook)"
+                        )
 
-                    register_pending_ingest(request_id, {
-                        "source_key": key,
-                        "mapped_local_path": local_out,
-                        "created_at_utc": datetime.utcnow().replace(microsecond=0).isoformat() + "Z",
-                        "xml_service_response": resp,
-                    })
+                    register_pending_ingest(
+                        request_id,
+                        {
+                            "source_key": key,
+                            "mapped_local_path": local_out,
+                            "created_at_utc": datetime.utcnow()
+                            .replace(microsecond=0)
+                            .isoformat()
+                            + "Z",
+                            "xml_service_response": resp,
+                        },
+                    )
 
                     print(
-                        f"[Processor] PENDING -> waiting webhook for request_id={request_id} source={key}")
+                        f"[Processor] PENDING -> waiting webhook for request_id={request_id} "
+                        f"source={key}"
+                    )
 
                 except Exception as e:
                     print(f"[Processor] FAILED for {key}: {e}")

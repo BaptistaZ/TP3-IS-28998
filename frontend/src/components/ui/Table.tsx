@@ -1,10 +1,26 @@
 import type { ReactNode } from "react";
 import styles from "./ui.module.css";
 
+// =============================================================================
+// Utilities
+// =============================================================================
+
+/**
+ * Filters falsy values to keep JSX concise.
+ */
 function cx(...parts: Array<string | false | undefined>) {
   return parts.filter(Boolean).join(" ");
 }
 
+// =============================================================================
+// Types
+// =============================================================================
+
+/**
+ * Column definition for a generic table.
+ * - `key` must be stable (used as React key)
+ * - `render` receives the row and returns the cell content
+ */
 export type TableColumn<T> = {
   header: ReactNode;
   key: string;
@@ -15,6 +31,17 @@ export type TableColumn<T> = {
   tdClassName?: string;
 };
 
+// =============================================================================
+// Table component
+// =============================================================================
+
+/**
+ * Generic table component with optional:
+ * - compact density
+ * - empty state
+ * - footer area
+ * - row click handling with basic keyboard accessibility (Enter/Space)
+ */
 export function Table<T>({
   columns,
   rows,
@@ -34,6 +61,7 @@ export function Table<T>({
   onRowClick?: (row: T, index: number) => void;
   rowAriaLabel?: (row: T, index: number) => string;
 }) {
+  // Treat the table as "interactive" when a click handler is provided.
   const clickable = typeof onRowClick === "function";
 
   return (
@@ -62,6 +90,7 @@ export function Table<T>({
               <tr
                 key={rowKey(r, idx)}
                 className={cx(styles.tr, clickable && styles.trClickable)}
+                // Only attach handlers/attributes when rows are actually clickable.
                 onClick={clickable ? () => onRowClick?.(r, idx) : undefined}
                 tabIndex={clickable ? 0 : undefined}
                 role={clickable ? "button" : undefined}
@@ -69,6 +98,8 @@ export function Table<T>({
                 onKeyDown={
                   clickable
                     ? (e) => {
+                        // Match common "button-like" keyboard behaviour:
+                        // Enter/Space triggers the row action.
                         if (e.key === "Enter" || e.key === " ") {
                           e.preventDefault();
                           onRowClick?.(r, idx);
@@ -93,6 +124,7 @@ export function Table<T>({
               </tr>
             ))}
 
+            {/* Empty state row (spans the full table width). */}
             {rows.length === 0 && (
               <tr className={styles.tr}>
                 <td className={styles.td} colSpan={columns.length}>
@@ -104,12 +136,28 @@ export function Table<T>({
         </table>
       </div>
 
+      {/* Optional extra content below the scrollable table (e.g., pagination). */}
       {footer}
     </div>
   );
 }
 
-export function TablePagination({ info, actions }: { info: ReactNode; actions: ReactNode }) {
+// =============================================================================
+// Pagination layout helper
+// =============================================================================
+
+/**
+ * Simple layout component to standardise pagination UI:
+ * - left: informational text (e.g., "1–50 de 120")
+ * - right: pagination actions (buttons/selectors)
+ */
+export function TablePagination({
+  info,
+  actions,
+}: {
+  info: ReactNode;
+  actions: ReactNode;
+}) {
   return (
     <div className={styles.pagination}>
       <div className={styles.paginationInfo}>{info}</div>

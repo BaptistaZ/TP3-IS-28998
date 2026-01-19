@@ -21,6 +21,10 @@ import { Drawer } from "../components/ui/Drawer";
 import styles from "./incidents.module.css";
 import { fmtDateTime, fmtDec, fmtEur, fmtInt, nonEmptyTrim } from "../lib/format";
 
+// =============================================================================
+// Types (GraphQL payload shape)
+// =============================================================================
+
 type IncidentRow = {
   docId: number;
   incidentId: string;
@@ -48,6 +52,10 @@ type IncidentRow = {
 
 type IncidentsData = { incidents: IncidentRow[] };
 
+// =============================================================================
+// Column picker configuration
+// =============================================================================
+
 const COLUMN_STORAGE_KEY = "incidents.visibleColumns.v1";
 
 const INCIDENT_COLUMN_OPTIONS: ColumnOption[] = [
@@ -64,12 +72,23 @@ const INCIDENT_COLUMN_OPTIONS: ColumnOption[] = [
   { key: "lastUpdateUtc", label: "Last update" },
 ];
 
+/**
+ * Default: all columns visible.
+ * (The ColumnPicker enforces "not zero visible columns" later.)
+ */
 function defaultVisibleColumns(): Record<string, boolean> {
   const v: Record<string, boolean> = {};
   for (const o of INCIDENT_COLUMN_OPTIONS) v[o.key] = true;
   return v;
 }
 
+// =============================================================================
+// URL param parsing helpers
+// =============================================================================
+
+/**
+ * Reads an integer query param. Returns null if missing/invalid.
+ */
 function readIntParam(searchParams: URLSearchParams, key: string): number | null {
   const raw = searchParams.get(key);
   if (!raw) return null;
@@ -78,10 +97,17 @@ function readIntParam(searchParams: URLSearchParams, key: string): number | null
   return Math.trunc(n);
 }
 
+/**
+ * Reads a string query param. Returns "" if missing.
+ */
 function readStrParam(searchParams: URLSearchParams, key: string): string {
   return searchParams.get(key) ?? "";
 }
 
+/**
+ * Clamps and truncates an int.
+ * Used for pagination and limit sanitization.
+ */
 function clampInt(n: number, min: number, max: number): number {
   if (!Number.isFinite(n)) return min;
   if (n < min) return min;
@@ -89,6 +115,14 @@ function clampInt(n: number, min: number, max: number): number {
   return Math.trunc(n);
 }
 
+// =============================================================================
+// UI mapping helpers (badges / formatting)
+// =============================================================================
+
+/**
+ * Severity is a string in the GraphQL schema but semantically numeric.
+ * Map to badge variants using numeric thresholds.
+ */
 function severityVariant(sev: string | null): "danger" | "warning" | "info" | "neutral" {
   if (!sev) return "neutral";
   const n = Number(sev);
@@ -99,6 +133,10 @@ function severityVariant(sev: string | null): "danger" | "warning" | "info" | "n
   return "neutral";
 }
 
+/**
+ * Map status (string) to badge variants.
+ * Keep it tolerant to unknown values.
+ */
 function statusVariant(st: string | null): "success" | "warning" | "danger" | "neutral" | "info" {
   const s = (st ?? "").toLowerCase();
   if (!s) return "neutral";
@@ -109,13 +147,27 @@ function statusVariant(st: string | null): "success" | "warning" | "danger" | "n
   return "neutral";
 }
 
+/**
+ * Trim helper for "safe" clipboard / display use.
+ */
 function safeText(v: string | null | undefined): string {
   return (v ?? "").trim();
 }
 
+// =============================================================================
+// Page
+// =============================================================================
+
 export default function Incidents() {
+  // -----------------------------
+  // URL state (read once on mount)
+  // -----------------------------
   const [searchParams, setSearchParams] = useSearchParams();
 
+  /**
+   * Each filter state initializes from URL query params.
+   * After that, UI edits are local until "Aplicar" is clicked (syncUrl + refetch).
+   */
   const [docId, setDocId] = useState<number | "">(() => {
     const n = readIntParam(searchParams, "docId");
     return typeof n === "number" && Number.isFinite(n) ? n : "";
@@ -125,23 +177,38 @@ export default function Incidents() {
   const [status, setStatus] = useState(() => readStrParam(searchParams, "status"));
   const [country, setCountry] = useState(() => readStrParam(searchParams, "country"));
 
+  // Pagination/limit from URL, with safeguards.
   const [limit, setLimit] = useState(() =>
     clampInt(readIntParam(searchParams, "limit") ?? 100, 10, 2000)
   );
   const [page, setPage] = useState(() => Math.max(0, readIntParam(searchParams, "page") ?? 0));
 
+  // Column visibility persisted in localStorage.
   const [visibleColumns, setVisibleColumns] = useState<Record<string, boolean>>(() => {
     return loadColumnPickerState(COLUMN_STORAGE_KEY) ?? defaultVisibleColumns();
   });
 
+  // Drawer selection (row details).
   const [selected, setSelected] = useState<IncidentRow | null>(null);
 
-  // Paginação com offset real (evita fetchLimit = limit*(page+1))
-  // Pedimos +1 linha para detetar se existe próxima página.
+  // -----------------------------
+  // Pagination (server-side via offset+limit)
+  // -----------------------------
+  /**
+   * We request one extra row (limit+1) to detect "hasNext".
+   * Then slice locally to render only 'safeLimit'.
+   */
   const safeLimit = clampInt(limit, 10, 2000);
   const offset = Math.max(0, page) * safeLimit;
   const requestLimit = safeLimit + 1;
 
+  // -----------------------------
+  // Apollo variables
+  // -----------------------------
+  /**
+   * nonEmptyTrim converts empty strings to undefined -> GraphQL doesn't send filter.
+   * docId is number or "" -> only send if number.
+   */
   const variables = useMemo(
     () => ({
       docId: typeof docId === "number" ? docId : undefined,
@@ -155,6 +222,10 @@ export default function Incidents() {
     [docId, type, severity, status, country, requestLimit, offset]
   );
 
+  /**
+   * cache-first: fast UI; "Aplicar" triggers refetch with explicit variables.
+   * If you want always-refresh behavior, consider cache-and-network.
+   */
   const { data, loading, error, refetch } = useQuery<IncidentsData>(Q_INCIDENTS, {
     variables,
     fetchPolicy: "cache-first",
@@ -162,6 +233,13 @@ export default function Incidents() {
 
   const rows = useMemo(() => data?.incidents ?? [], [data?.incidents]);
 
+  // -----------------------------
+  // Filter chips (summary + remove)
+  // -----------------------------
+  /**
+   * Chips reflect current local UI state, not necessarily URL state.
+   * Removing a chip updates the local state and resets to page 0.
+   */
   const chips = useMemo<FilterChip[]>(() => {
     const items: FilterChip[] = [];
 
@@ -222,6 +300,13 @@ export default function Incidents() {
     return items;
   }, [docId, type, severity, status, country]);
 
+  // -----------------------------
+  // Table columns (all + filtered)
+  // -----------------------------
+  /**
+   * allCols is memoized once because render functions are stable.
+   * Column visibility is handled by filtering based on visibleColumns state.
+   */
   const allCols = useMemo<Array<TableColumn<IncidentRow>>>(
     () => [
       { key: "docId", header: "Doc", mono: true, render: (r) => r.docId },
@@ -253,7 +338,8 @@ export default function Incidents() {
         key: "estimatedCostEur",
         header: "Cost (EUR)",
         align: "right",
-        render: (r) => (typeof r.estimatedCostEur === "number" ? fmtEur(r.estimatedCostEur) : "-"),
+        render: (r) =>
+          typeof r.estimatedCostEur === "number" ? fmtEur(r.estimatedCostEur) : "-",
       },
       {
         key: "reportedAt",
@@ -271,18 +357,36 @@ export default function Incidents() {
     []
   );
 
+  /**
+   * Apply user column visibility (false => hidden).
+   */
   const cols = useMemo(
     () => allCols.filter((c) => visibleColumns[c.key] !== false),
     [allCols, visibleColumns]
   );
 
+  // -----------------------------
+  // Pagination derived values
+  // -----------------------------
   const safePage = Math.max(0, page);
+
+  // Has next if server returned "extra" row.
   const hasNext = rows.length > safeLimit;
+
+  // Display only up to safeLimit rows.
   const pagedRows = useMemo(() => rows.slice(0, safeLimit), [rows, safeLimit]);
+
   const pageStart = safePage * safeLimit;
   const pageEnd = pageStart + pagedRows.length;
   const hasPrev = safePage > 0;
 
+  // -----------------------------
+  // URL sync helper
+  // -----------------------------
+  /**
+   * Writes a clean URL state: only non-empty filters + non-default pagination.
+   * Keeps URLs shareable/bookmarkable.
+   */
   function syncUrl(nextPage: number) {
     const next: Record<string, string> = {};
 
@@ -305,6 +409,10 @@ export default function Incidents() {
 
     setSearchParams(next);
   }
+
+  // =============================================================================
+  // Render
+  // =============================================================================
 
   return (
     <div className={styles.page}>
@@ -405,8 +513,11 @@ export default function Incidents() {
                 variant="primary"
                 disabled={loading}
                 onClick={() => {
+                  // Reset pagination to first page and push URL state.
                   syncUrl(0);
                   setPage(0);
+
+                  // Force refetch with offset=0 to reflect new filters immediately.
                   refetch({
                     docId: typeof docId === "number" ? docId : undefined,
                     type: nonEmptyTrim(type),
@@ -424,6 +535,7 @@ export default function Incidents() {
               <Button
                 disabled={loading}
                 onClick={() => {
+                  // Clear local state + URL state.
                   setDocId("");
                   setType("");
                   setSeverity("");
@@ -445,6 +557,7 @@ export default function Incidents() {
         <FilterSummary
           chips={chips}
           onSave={() => {
+            // Persist current filter set for future UX work (optional).
             try {
               window.localStorage.setItem(
                 "incidents.savedFilter.v1",
@@ -457,7 +570,7 @@ export default function Incidents() {
                 })
               );
             } catch {
-              // ignore
+              // ignore storage failures (private mode / quota)
             }
           }}
         />
@@ -607,8 +720,7 @@ export default function Incidents() {
                   : "-"}
               </div>
               <div>
-                <strong>Reported:</strong>{" "}
-                {selected.reportedAt ? fmtDateTime(selected.reportedAt) : "-"}
+                <strong>Reported:</strong> {selected.reportedAt ? fmtDateTime(selected.reportedAt) : "-"}
               </div>
               <div>
                 <strong>Last update:</strong>{" "}

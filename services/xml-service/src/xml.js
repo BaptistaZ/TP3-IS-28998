@@ -1,14 +1,26 @@
 import { create } from "xmlbuilder2";
 import { z } from "zod";
 
-// Base payload validation
+/* =============================================================================
+ * Ingest payload validation (multipart fields)
+ * ============================================================================= */
+
+/**
+ * Minimal validation for the non-file ingest fields.
+ * The file itself ("mapped_csv") is validated/handled at the route level.
+ */
 export const IngestSchema = z.object({
   request_id: z.string().min(3),
   mapper_version: z.string().min(1),
   webhook_url: z.string().url(),
 });
 
-// Required columns from the Processor output
+/* =============================================================================
+ * Processor mapped CSV contract (required columns)
+ * =============================================================================
+ *
+ * These are the required header columns produced by the Processor after mapping/enrichment.
+ */
 const REQUIRED_COLUMNS = [
   "id_ocorrencia",
   "origem",
@@ -44,6 +56,24 @@ const REQUIRED_COLUMNS = [
   "observacoes",
 ];
 
+/* =============================================================================
+ * Low-level parsing helpers
+ * ============================================================================= */
+
+/**
+ * Parse a single CSV line into fields.
+ *
+ * Supports:
+ * - Comma separators
+ * - Quoted fields (")
+ * - Escaped quotes inside quoted fields ("")
+ *
+ * This is a lightweight parser suitable for the Processor output. It assumes:
+ * - No multiline quoted fields (rows are single-line).
+ *
+ * @param {string} line
+ * @returns {string[]}
+ */
 function parseCsvLine(line) {
   const out = [];
   let cur = "";
@@ -53,7 +83,7 @@ function parseCsvLine(line) {
     const ch = line[i];
 
     if (ch === '"') {
-      // Handle escaped quote: ""
+      // Escaped quote within quoted text: ""
       if (inQuotes && line[i + 1] === '"') {
         cur += '"';
         i++;
@@ -76,36 +106,84 @@ function parseCsvLine(line) {
   return out;
 }
 
+/**
+ * Convert a value to a number (or null if empty/invalid).
+ *
+ * @param {any} value
+ * @returns {number|null}
+ */
 function toNumber(value) {
   if (value === null || value === undefined) return null;
   const s = String(value).trim();
   if (!s) return null;
+
   const n = Number(s);
   return Number.isFinite(n) ? n : null;
 }
 
+/**
+ * Convert a value to a boolean (or null if not parseable).
+ *
+ * Accepted truthy: true, 1, yes
+ * Accepted falsy:  false, 0, no
+ *
+ * @param {any} value
+ * @returns {boolean|null}
+ */
 function toBoolean(value) {
   if (value === null || value === undefined) return null;
+
   const s = String(value).trim().toLowerCase();
   if (s === "true" || s === "1" || s === "yes") return true;
   if (s === "false" || s === "0" || s === "no") return false;
+
   return null;
 }
 
 /**
- * Expected mapped CSV produced by the Processor
+ * Return a trimmed attribute value if present; otherwise undefined.
+ * xmlbuilder2 omits attributes with value `undefined`.
+ *
+ * @param {any} value
+ * @returns {string|undefined}
+ */
+function attrIf(value) {
+  if (value === null || value === undefined) return undefined;
+  const s = String(value).trim();
+  return s ? s : undefined;
+}
+
+/* =============================================================================
+ * Public: mapped CSV parser
+ * ============================================================================= */
+
+/**
+ * Parse the mapped CSV produced by the Processor.
+ *
+ * Validation:
+ * - CSV must contain a header and at least one data row.
+ * - Header must include all REQUIRED_COLUMNS.
+ *
+ * Output:
+ * - Returns a normalized array of row objects used by buildXml().
+ *
+ * @param {string} text - Full CSV file contents.
+ * @returns {Array<Object>} Parsed and normalized row objects.
+ * @throws {Error} When CSV is empty or missing required columns.
  */
 export function parseMappedCsv(text) {
   const lines = text.trim().split(/\r?\n/);
   if (lines.length < 2) throw new Error("Empty CSV or no data rows");
 
   const header = parseCsvLine(lines[0]).map((h) => h.trim());
+
   for (const col of REQUIRED_COLUMNS) {
     if (!header.includes(col)) {
       throw new Error(`Missing required CSV column: ${col}`);
     }
   }
 
+  // Build a header index map for O(1) column access.
   const idx = Object.fromEntries(header.map((h, i) => [h, i]));
 
   const rows = [];
@@ -113,6 +191,8 @@ export function parseMappedCsv(text) {
     if (!lines[i].trim()) continue;
 
     const cols = parseCsvLine(lines[i]);
+
+    // Skip malformed/short rows rather than crashing the whole ingest.
     if (cols.length < header.length) continue;
 
     rows.push({
@@ -162,14 +242,33 @@ export function parseMappedCsv(text) {
   return rows;
 }
 
-function attrIf(value) {
-  if (value === null || value === undefined) return undefined;
-  const s = String(value).trim();
-  return s ? s : undefined;
-}
+/* =============================================================================
+ * Public: XML builder
+ * ============================================================================= */
 
+/**
+ * Build the hierarchical XML document expected by downstream XPath/XMLTable queries.
+ *
+ * Structure:
+ * IncidentReport (root)
+ *  - Configuration
+ *  - Incidents
+ *     - Incident (repeated)
+ *        - Location (+ Coordinates)
+ *        - Weather
+ *        - Timeline
+ *        - Response
+ *        - Assessment
+ *        - FinancialImpact
+ *        - Meta
+ *
+ * @param {Object} params
+ * @param {string} params.requestId
+ * @param {string} params.mapperVersion
+ * @param {Array<Object>} params.rows - Output from parseMappedCsv()
+ * @returns {string} Pretty-printed XML document string.
+ */
 export function buildXml({ requestId, mapperVersion, rows }) {
-  // Hierarchical XML: IncidentReport -> Configuration -> Incidents -> Incident
   const doc = create({ version: "1.0", encoding: "UTF-8" })
     .ele("IncidentReport", {
       GeneratedAtUTC: new Date().toISOString(),
