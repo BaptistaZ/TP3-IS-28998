@@ -129,3 +129,4 @@ message AggBySeverityRow {
 
 message AggBySeverityResponse {
   repeated AggBySeverityRow rows = 1;
+}
