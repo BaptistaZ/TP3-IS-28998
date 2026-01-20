@@ -42,6 +42,9 @@ services:
     volumes:
       # Optional: persisted XML debug outputs (enabled/disabled via env flags)
       - ../services/xml-service/generated-xml:/app/generated-xml
+    environment:
+      - SAVE_XML_FILES=1
+
 
   # ---------------------------------------------------------------------------
   # gRPC Service: gRPC interface backed by the same Postgres XML store
