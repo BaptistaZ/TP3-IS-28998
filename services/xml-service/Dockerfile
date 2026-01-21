@@ -2,6 +2,8 @@ FROM node:20-alpine
 
 WORKDIR /app
 
+RUN apk add --no-cache libxml2-utils
+
 COPY services/xml-service/package*.json ./
 RUN npm ci
 

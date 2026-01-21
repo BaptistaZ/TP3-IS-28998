@@ -1,0 +1,137 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" elementFormDefault="qualified">
+
+  <xs:element name="IncidentReport">
+    <xs:complexType>
+      <xs:sequence>
+        <xs:element name="Configuration" type="ConfigurationType"/>
+        <xs:element name="Incidents" type="IncidentsType"/>
+      </xs:sequence>
+
+      <xs:attribute name="GeneratedAtUTC" type="xs:dateTime" use="required"/>
+      <xs:attribute name="Version" type="xs:string" use="required"/>
+    </xs:complexType>
+  </xs:element>
+
+  <xs:complexType name="ConfigurationType">
+    <xs:attribute name="ValidatedBy" type="xs:string" use="required"/>
+    <xs:attribute name="RequestId" type="xs:string" use="required"/>
+    <xs:attribute name="MapperVersion" type="xs:string" use="required"/>
+  </xs:complexType>
+
+  <xs:complexType name="IncidentsType">
+    <xs:sequence>
+      <xs:element name="Incident" type="IncidentType" minOccurs="1" maxOccurs="unbounded"/>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="IncidentType">
+    <xs:sequence>
+      <xs:element name="Location" type="LocationType"/>
+      <xs:element name="Weather" type="WeatherType"/>
+      <xs:element name="Timeline" type="TimelineType"/>
+      <xs:element name="Response" type="ResponseType"/>
+      <xs:element name="Assessment" type="AssessmentType"/>
+      <xs:element name="FinancialImpact" type="FinancialImpactType"/>
+      <xs:element name="Meta" type="MetaType"/>
+    </xs:sequence>
+
+    <xs:attribute name="IncidentId" type="xs:string" use="required"/>
+    <xs:attribute name="Source" type="xs:string" use="required"/>
+    <xs:attribute name="Type" type="xs:string" use="required"/>
+    <xs:attribute name="Severity" type="xs:string" use="required"/>
+    <xs:attribute name="Status" type="xs:string" use="required"/>
+  </xs:complexType>
+
+  <xs:complexType name="LocationType">
+    <xs:sequence>
+      <xs:element name="Coordinates" type="CoordinatesType"/>
+    </xs:sequence>
+
+    <xs:attribute name="City" type="xs:string" use="required"/>
+    <xs:attribute name="Country" type="xs:string" use="required"/>
+    <xs:attribute name="Continent" type="xs:string" use="required"/>
+
+    <xs:attribute name="AccuracyMeters" type="xs:decimal" use="optional"/>
+    <xs:attribute name="Corrected" type="xs:boolean" use="optional"/>
+  </xs:complexType>
+
+  <xs:complexType name="CoordinatesType">
+    <xs:attribute name="Lat" type="xs:decimal" use="optional"/>
+    <xs:attribute name="Lon" type="xs:decimal" use="optional"/>
+  </xs:complexType>
+
+  <xs:complexType name="WeatherType">
+    <xs:sequence>
+      <xs:element name="TemperatureC" type="xs:string"/>
+      <xs:element name="WindKMH" type="xs:string"/>
+      <xs:element name="PrecipitationMM" type="xs:string"/>
+    </xs:sequence>
+
+    <xs:attribute name="Source" type="xs:string" use="optional"/>
+    <xs:attribute name="TimeUTC" type="xs:dateTime" use="optional"/>
+    <xs:attribute name="Code" type="xs:integer" use="optional"/>
+  </xs:complexType>
+
+  <xs:complexType name="TimelineType">
+    <xs:sequence>
+      <xs:element name="ReportedAt" type="xs:string"/>
+      <xs:element name="ValidatedAt" type="xs:string"/>
+      <xs:element name="ResolvedAt" type="xs:string"/>
+      <xs:element name="LastUpdateUTC" type="xs:string"/>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="ResponseType">
+    <xs:sequence>
+      <xs:element name="AssignedUnit" type="xs:string"/>
+      <xs:element name="ResourcesCount" type="xs:string"/>
+      <xs:element name="EtaMinutes" type="xs:string"/>
+      <xs:element name="ResponseTimeMinutes" type="xs:string"/>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="AssessmentType">
+    <xs:sequence>
+      <xs:element name="RiskScore" type="xs:string"/>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="FinancialImpactType">
+    <xs:sequence>
+      <xs:element name="EstimatedCost" type="EstimatedCostType" minOccurs="2" maxOccurs="2"/>
+      <xs:element name="ExchangeRate" type="ExchangeRateType"/>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="EstimatedCostType">
+    <xs:simpleContent>
+      <xs:extension base="xs:string">
+        <xs:attribute name="currency" use="required">
+          <xs:simpleType>
+            <xs:restriction base="xs:string">
+              <xs:enumeration value="EUR"/>
+              <xs:enumeration value="USD"/>
+            </xs:restriction>
+          </xs:simpleType>
+        </xs:attribute>
+      </xs:extension>
+    </xs:simpleContent>
+  </xs:complexType>
+
+  <xs:complexType name="ExchangeRateType">
+    <xs:simpleContent>
+      <xs:extension base="xs:string">
+        <xs:attribute name="source" type="xs:string" use="required"/>
+      </xs:extension>
+    </xs:simpleContent>
+  </xs:complexType>
+
+  <xs:complexType name="MetaType">
+    <xs:sequence>
+      <xs:element name="Tags" type="xs:string"/>
+      <xs:element name="Notes" type="xs:string"/>
+    </xs:sequence>
+  </xs:complexType>
+
+</xs:schema>

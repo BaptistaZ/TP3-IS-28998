@@ -4,6 +4,7 @@ import multer from "multer";
 import axios from "axios";
 import fs from "fs";
 import path from "path";
+import { validateXmlWithXsd } from "./xsdValidate.js";
 
 import {
   listDocs,
@@ -286,6 +287,20 @@ app.post("/ingest", upload.single("mapped_csv"), async (req, res) => {
       httpStatus: 400,
       status: "ERRO_VALIDACAO",
       error: "Generated XML is not well-formed",
+    });
+  }
+
+  const xsdPath = path.resolve("schema/incident_report.xsd");
+  const xsdRes = await validateXmlWithXsd(xml, xsdPath);
+
+  if (!xsdRes.ok) {
+    return await respondFailure({
+      res,
+      requestId,
+      webhookUrl,
+      httpStatus: 400,
+      status: "ERRO_VALIDACAO",
+      error: `XML does not conform to XSD: ${xsdRes.error}`,
     });
   }
 
