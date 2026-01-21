@@ -153,6 +153,33 @@ function attrIf(value) {
   return s ? s : undefined;
 }
 
+function toXsdDateTime(value) {
+  const s = String(value ?? "").trim();
+  if (!s) return null;
+
+  // Se já tiver timezone (Z ou +hh:mm / -hh:mm) e segundos, deixa estar
+  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(Z|[+-]\d{2}:\d{2})$/.test(s)) {
+    return s;
+  }
+
+  // "YYYY-MM-DDTHH:MM" -> adiciona ":00Z"
+  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(s)) {
+    return `${s}:00Z`;
+  }
+
+  // "YYYY-MM-DD HH:MM" -> converte para "T" e adiciona ":00Z"
+  if (/^\d{4}-\d{2}-\d{2}\s\d{2}:\d{2}$/.test(s)) {
+    return `${s.replace(" ", "T")}:00Z`;
+  }
+
+  // Tenta parsear com Date() e converter para ISO UTC
+  const d = new Date(s);
+  if (!Number.isNaN(d.getTime())) return d.toISOString();
+
+  // Se não der para entender, devolve null para omitir o atributo (ou lançar erro)
+  return null;
+}
+
 /* =============================================================================
  * Public: mapped CSV parser
  * ============================================================================= */
@@ -229,7 +256,7 @@ export function parseMappedCsv(text) {
       weather_wind_kmh: toNumber(cols[idx.meteo_vento_kmh]),
       weather_precip_mm: toNumber(cols[idx.meteo_precip_mm]),
       weather_code: toNumber(cols[idx.meteo_codigo]),
-      weather_time_utc: cols[idx.meteo_time_utc],
+      weather_time_utc: toXsdDateTime(cols[idx.meteo_time_utc]),
 
       risk_score: toNumber(cols[idx.score_risco]),
       location_corrected: toBoolean(cols[idx.local_corrigido]),
