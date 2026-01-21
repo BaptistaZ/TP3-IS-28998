@@ -291,6 +291,9 @@ app.post("/ingest", upload.single("mapped_csv"), async (req, res) => {
   }
 
   const xsdPath = path.resolve("schema/incident_report.xsd");
+
+  console.log(`[XML Service] XSD validate start -> xsd=${xsdPath}`);
+
   const xsdRes = await validateXmlWithXsd(xml, xsdPath);
 
   if (!xsdRes.ok) {
@@ -303,6 +306,8 @@ app.post("/ingest", upload.single("mapped_csv"), async (req, res) => {
       error: `XML does not conform to XSD: ${xsdRes.error}`,
     });
   }
+
+  console.log(`[XML Service] XSD validate OK (request_id=${requestId})`);
 
   // Persist to DB and capture the generated document ID.
   let docIdInserted;
